@@ -37,23 +37,23 @@
     "appId": "com.facundogrillo.numlab",
     "productName": "NumLab",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "resources"
     },
     "files": [
       "dist/**/*",
       "electron/**/*",
-      "src/icon.png",
       "package.json"
     ],
     "asar": true,
     "mac": {
       "target": ["dmg"],
       "category": "public.app-category.education",
-      "icon": "src/icon.png"
+      "icon": "resources/icon.icns"
     },
     "win": {
       "target": ["nsis"],
-      "icon": "src/icon.ico"
+      "icon": "resources/icon.ico"
     },
     "nsis": {
       "oneClick": false,
