@@ -9,21 +9,9 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - os: macos-latest
-            target: mac
-            artifact: macos-installer
-            path: release/*.dmg
-          - os: windows-latest
-            target: win
-            artifact: windows-installer
-            path: release/*.exe
-
+  build-win:
+    name: Build Windows
+    runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -42,31 +30,64 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build installer
-        run: pnpm run dist:${{ matrix.target }}
+      - name: Build Windows installer
+        run: pnpm run dist:win
 
-      - name: Upload installer
+      - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.path }}
+          name: windows-installer
+          path: release/*.exe
+
+  build-mac:
+    name: Build macOS
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build macOS installer
+        run: pnpm run dist:mac
+
+      - name: Upload macOS installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-installer
+          path: release/*.dmg
 
   release:
     name: Publish GitHub Release
-    needs: build
+    needs: [build-win, build-mac]
     runs-on: ubuntu-latest
+    if: always()
     steps:
-      - name: Download macOS installer
-        uses: actions/download-artifact@v4
-        with:
-          name: macos-installer
-          path: release
-
       - name: Download Windows installer
         uses: actions/download-artifact@v4
         with:
           name: windows-installer
           path: release
+        continue-on-error: true
+
+      - name: Download macOS installer
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-installer
+          path: release
+        continue-on-error: true
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
