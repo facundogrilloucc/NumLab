@@ -30,17 +30,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install Python and convert icon to ICO
-        run: |
-          pip install Pillow
-          python -c "
-          from PIL import Image
-          img = Image.open('src/icon.png').convert('RGBA')
-          sizes = [(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)]
-          img.save('src/icon.ico', format='ICO', sizes=sizes)
-          print('ICO generado correctamente')
-          "
-          
       - name: Build Windows installer
         run: pnpm run dist:win
 
