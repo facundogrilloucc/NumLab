@@ -1,29 +1,61 @@
+# Dependencies
 node_modules/
 .pnpm-store/
+
+# Build & Electron outputs
 dist/
 release/
 build/
+out/
 coverage/
 .cache/
-.env*
-!.env.example
 .vite/
 vite.config.*.timestamp-*
 *.tsbuildinfo
+
+# Electron installer binaries & debug configs (if generated in root)
+*.dmg
+*.dmg.blockmap
+*.exe
+*.exe.blockmap
+*.AppImage
+*.snap
+*.deb
+*.rpm
+builder-debug.yml
+builder-effective-config.yaml
+latest-*.yml
+
+# Environment & logs
+.env*
+!.env.example
 *-debug.log*
 logs/
 *.log
 .claude-replay.*
 .tmp-*
+
+# OS files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE & Editor folders
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+
+# Project / Agent specific
 .figma/
 AGENTS.md
 CLAUDE.md
 resumen_metodos_numericos.md
-
-# Platform-managed agentplat state, not project source. In the
-# client-initiated single-repo workspace layout (make's `Path: "."` spec) the
-# repo root IS the workspace root, so these land inside this repo rather than
-# beside it.
 /.plugins/
 /.opencode-skills/

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
+import React, { useState, useMemo, useCallback, useEffect, useRef, Fragment } from "react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ReferenceLine, ResponsiveContainer, BarChart, Bar, Cell,
@@ -13,6 +13,7 @@ import {
   type MethodResult, type Iteration,
 } from "./lib/methods";
 import { isValidExpr } from "./lib/mathEval";
+import { exportTableToCSV, copyTableToClipboard, copyTableToLatex, exportChartToPng } from "./lib/exportUtils";
 import MathExpressionInput from "./components/MathExpressionInput";
 import logo from "./logo.png";
 import icon from "./icon.png";
@@ -88,7 +89,7 @@ function validateExpression(expr: string | undefined, label = "La expresión"): 
 const DEFAULTS: Record<string, Record<string, string>> = {
   bisection:      { expr: "x^3 - x - 2", a: "1", b: "2", tol: "1e-6", maxIter: "50" },
   "fixed-point":  { fExpr: "x^3 - x - 2", gExpr: "(x + 2)^(1/3)", x0: "1.5", tol: "1e-6", maxIter: "50" },
-  newton:         { expr: "x^3 - x - 2", x0: "1.5", tol: "1e-6", maxIter: "50" },
+  newton:         { expr: "x^3 - x - 2", dExpr: "3*x^2 - 1", x0: "1.5", tol: "1e-6", maxIter: "50" },
   secant:         { expr: "x^3 - x - 2", x0: "1", x1: "2", tol: "1e-6", maxIter: "50" },
   gaussian:       { size: "3", A_0_0:"3", A_0_1:"-0.1", A_0_2:"-0.2", A_1_0:"0.1", A_1_1:"7", A_1_2:"-0.3", A_2_0:"0.3", A_2_1:"-0.2", A_2_2:"10", b_0:"7.85", b_1:"-19.3", b_2:"71.4" },
   "gauss-seidel": { size: "3", A_0_0:"3", A_0_1:"-0.1", A_0_2:"-0.2", A_1_0:"0.1", A_1_1:"7", A_1_2:"-0.3", A_2_0:"0.3", A_2_1:"-0.2", A_2_2:"10", b_0:"7.85", b_1:"-19.3", b_2:"71.4", x0_0:"0", x0_1:"0", x0_2:"0", tol:"1e-6", maxIter:"50" },
@@ -244,6 +245,7 @@ function ParamsPanel({ methodId, p, onChange }: { methodId: string; p: Record<st
   if (methodId === "newton") return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {mathF("expr", "f(x)", "cos(x) - x")}
+      {mathF("dExpr", "f'(x) — derivada analítica (opcional)", "Si la dejas vacía se usa derivada numérica")}
       <div style={r3}>{numF("x0", "x₀ inicial")}{numF("tol", "Tolerancia", "Decimales con punto: 0.0001")}{numF("maxIter", "Máx. iter.")}</div>
     </div>
   );
@@ -300,7 +302,8 @@ function Card({ label, value, color, wide }: { label: string; value: string; col
 function SummaryRow({ result, methodId, color }: { result: MethodResult; methodId: string; color: string }) {
   const cat = getCat(methodId)?.id ?? "";
   const last = result.iterations.at(-1);
-  const errVal = last && typeof last.error === "number" && (last.error as number) > 0 ? (last.error as number).toExponential(3) : "—";
+  const finalErr = typeof result.extra?.finalError === "number" ? result.extra.finalError : (last && typeof last.error === "number" ? last.error : undefined);
+  const errVal = typeof finalErr === "number" && Number.isFinite(finalErr) ? finalErr.toExponential(3) : "—";
 
   if (result.solution) {
     return (
@@ -347,13 +350,102 @@ function SummaryRow({ result, methodId, color }: { result: MethodResult; methodI
   );
 }
 
-// ── Iteration table ────────────────────────────────────────────────────────────
+// ── Iteration table & Export Action Bar ───────────────────────────────────────
 
-function IterTable({ iterations }: { iterations: Iteration[] }) {
+function TableActionBar({
+  iterations,
+  methodName,
+}: {
+  iterations: Iteration[];
+  methodName: string;
+}) {
+  const [copiedType, setCopiedType] = useState<"clipboard" | "latex" | null>(null);
+
+  const handleExportCSV = () => {
+    const safeName = methodName.replace(/[^\w\s-]/g, "").replace(/\s+/g, "_");
+    const filename = `NumLab_${safeName}_${new Date().toISOString().slice(0, 10)}.csv`;
+    exportTableToCSV(iterations, filename);
+  };
+
+  const handleCopyClipboard = async () => {
+    const ok = await copyTableToClipboard(iterations);
+    if (ok) {
+      setCopiedType("clipboard");
+      setTimeout(() => setCopiedType(null), 2000);
+    }
+  };
+
+  const handleCopyLatex = async () => {
+    const ok = await copyTableToLatex(iterations);
+    if (ok) {
+      setCopiedType("latex");
+      setTimeout(() => setCopiedType(null), 2000);
+    }
+  };
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, paddingBottom: 10, flexWrap: "wrap" }}>
+      <span style={{ ...mono, fontSize: 11, color: "var(--color-text-muted)" }}>
+        {iterations.length} fila{iterations.length !== 1 ? "s" : ""} de datos
+      </span>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <button
+          onClick={handleExportCSV}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 5,
+            padding: "4px 10px", borderRadius: 5,
+            background: "#0c1322", border: "1px solid var(--color-border)",
+            color: "var(--color-text-bright)", ...ui, fontSize: 11, cursor: "pointer",
+            transition: "all 0.15s",
+          }}
+          title="Descargar tabla en formato CSV compatible con Excel"
+        >
+          <span>📥</span> Exportar CSV
+        </button>
+
+        <button
+          onClick={handleCopyClipboard}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 5,
+            padding: "4px 10px", borderRadius: 5,
+            background: copiedType === "clipboard" ? "#10b98122" : "#0c1322",
+            border: `1px solid ${copiedType === "clipboard" ? "#10b981" : "var(--color-border)"}`,
+            color: copiedType === "clipboard" ? "#10b981" : "var(--color-text-bright)",
+            ...ui, fontSize: 11, cursor: "pointer", transition: "all 0.15s",
+          }}
+          title="Copiar celdas para pegar directamente en Excel con Ctrl+V"
+        >
+          <span>{copiedType === "clipboard" ? "✓" : "📋"}</span>
+          {copiedType === "clipboard" ? "¡Copiado a Excel!" : "Copiar a Excel"}
+        </button>
+
+        <button
+          onClick={handleCopyLatex}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 5,
+            padding: "4px 10px", borderRadius: 5,
+            background: copiedType === "latex" ? "#3b82f622" : "#0c1322",
+            border: `1px solid ${copiedType === "latex" ? "#3b82f6" : "var(--color-border)"}`,
+            color: copiedType === "latex" ? "#3b82f6" : "var(--color-text-bright)",
+            ...ui, fontSize: 11, cursor: "pointer", transition: "all 0.15s",
+          }}
+          title="Copiar tabla en formato de código LaTeX"
+        >
+          <span>{copiedType === "latex" ? "✓" : "📄"}</span>
+          {copiedType === "latex" ? "¡LaTeX copiado!" : "Copiar LaTeX"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function IterTable({ iterations, methodName = "Metodo" }: { iterations: Iteration[]; methodName?: string }) {
   if (!iterations.length) return <p style={{ ...mono, fontSize: 12, color: "var(--color-text-muted)", margin: 0 }}>Sin datos de iteraciones.</p>;
   const cols = Array.from(new Set(iterations.flatMap(iteration => Object.keys(iteration))));
   return (
-    <div style={{ flex: 1, overflowY: "auto", overflowX: "auto", borderRadius: 6, border: "1px solid var(--color-border)" }}>
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+      <TableActionBar iterations={iterations} methodName={methodName} />
+      <div style={{ flex: 1, overflowY: "auto", overflowX: "auto", borderRadius: 6, border: "1px solid var(--color-border)" }}>
       <table style={{ width: "100%", borderCollapse: "collapse", ...mono, fontSize: 11 }}>
         <thead>
           <tr style={{ background: "#080c14", position: "sticky", top: 0, zIndex: 1 }}>
@@ -374,6 +466,197 @@ function IterTable({ iterations }: { iterations: Iteration[] }) {
           ))}
         </tbody>
       </table>
+      </div>
+    </div>
+  );
+}
+
+// ── Matrix Step Views (Linear Systems) ────────────────────────────────────────
+
+function AugmentedMatrixView({ matrix }: { matrix: number[][] }) {
+  if (!matrix || !matrix.length) return null;
+  const cols = matrix[0].length;
+  return (
+    <div style={{ display: "inline-flex", alignItems: "stretch", background: "#070b12", border: "1px solid #1c2638", borderRadius: 6, padding: "8px 12px", gap: 6 }}>
+      <div style={{ borderLeft: "2px solid #3b82f6", borderTop: "2px solid #3b82f6", borderBottom: "2px solid #3b82f6", width: 6, borderRadius: "3px 0 0 3px", marginRight: 4 }} />
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols - 1}, auto) 2px auto`, gap: "6px 12px", alignItems: "center" }}>
+        {matrix.map((row, r) => (
+          <React.Fragment key={r}>
+            {row.slice(0, cols - 1).map((val, c) => {
+              const isZero = Math.abs(val) < 1e-10;
+              return (
+                <div key={c} style={{
+                  ...mono, fontSize: 11, textAlign: "right", minWidth: 54, padding: "2px 4px", borderRadius: 3,
+                  color: isZero ? "#00d4ff" : "var(--color-text-bright)",
+                  background: isZero ? "#00d4ff12" : "transparent",
+                  fontWeight: isZero ? 700 : 400,
+                }}>
+                  {isZero ? "0" : val.toFixed(4)}
+                </div>
+              );
+            })}
+            <div style={{ width: 1.5, height: "100%", background: "#24324a" }} />
+            <div style={{
+              ...mono, fontSize: 11, textAlign: "right", minWidth: 54, padding: "2px 4px", borderRadius: 3,
+              color: "#f59e0b", fontWeight: 600,
+            }}>
+              {row[cols - 1].toFixed(4)}
+            </div>
+          </React.Fragment>
+        ))}
+      </div>
+      <div style={{ borderRight: "2px solid #3b82f6", borderTop: "2px solid #3b82f6", borderBottom: "2px solid #3b82f6", width: 6, borderRadius: "0 3px 3px 0", marginLeft: 4 }} />
+    </div>
+  );
+}
+
+function SimpleMatrixView({ matrix, highlightColor }: { matrix: number[][]; highlightColor: string }) {
+  if (!matrix || !matrix.length) return null;
+  const cols = matrix[0].length;
+  return (
+    <div style={{ display: "inline-flex", alignItems: "stretch", background: "#070b12", border: "1px solid #1c2638", borderRadius: 6, padding: "8px 12px", gap: 6 }}>
+      <div style={{ borderLeft: `2px solid ${highlightColor}`, borderTop: `2px solid ${highlightColor}`, borderBottom: `2px solid ${highlightColor}`, width: 6, borderRadius: "3px 0 0 3px", marginRight: 4 }} />
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols}, auto)`, gap: "6px 12px", alignItems: "center" }}>
+        {matrix.map((row, r) => (
+          <React.Fragment key={r}>
+            {row.map((val, c) => {
+              const isZero = Math.abs(val) < 1e-10;
+              return (
+                <div key={c} style={{
+                  ...mono, fontSize: 11, textAlign: "right", minWidth: 48, padding: "2px 4px", borderRadius: 3,
+                  color: isZero ? "#4f6070" : "var(--color-text-bright)",
+                  fontWeight: Math.abs(val) >= 1e-10 ? 600 : 400,
+                }}>
+                  {isZero ? "0" : val.toFixed(4)}
+                </div>
+              );
+            })}
+          </React.Fragment>
+        ))}
+      </div>
+      <div style={{ borderRight: `2px solid ${highlightColor}`, borderTop: `2px solid ${highlightColor}`, borderBottom: `2px solid ${highlightColor}`, width: 6, borderRadius: "0 3px 3px 0", marginLeft: 4 }} />
+    </div>
+  );
+}
+
+function GaussianStepsView({
+  matrixSteps,
+  backSteps,
+  color
+}: {
+  matrixSteps: { step: number; operation: string; factor?: number; matrix: number[][] }[];
+  backSteps?: { variable: string; formula: string; value: number }[];
+  color: string;
+}) {
+  return (
+    <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 14, paddingRight: 4 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <SectionLabel>1. Triangulación de la matriz aumentada [A | b]</SectionLabel>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 12 }}>
+          {matrixSteps.map(s => (
+            <div key={s.step} style={{ background: "#0b101b", border: "1px solid var(--color-border)", borderRadius: 7, padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                <span style={{ ...mono, fontSize: 10, fontWeight: 700, color: s.step === 0 ? "#10b981" : color, textTransform: "uppercase", letterSpacing: "0.05em", background: (s.step === 0 ? "#10b981" : color) + "18", padding: "2px 8px", borderRadius: 4 }}>
+                  {s.step === 0 ? "Paso 0 (Inicial)" : `Paso ${s.step}`}
+                </span>
+                <span style={{ ...mono, fontSize: 11, color: "var(--color-text-bright)", fontWeight: 500 }}>
+                  {s.operation}
+                </span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "center", padding: "4px 0" }}>
+                <AugmentedMatrixView matrix={s.matrix} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {backSteps && backSteps.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+          <SectionLabel>2. Sustitución regresiva (despeje de variables)</SectionLabel>
+          <div style={{ background: "#0b101b", border: "1px solid var(--color-border)", borderRadius: 7, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+            {backSteps.map((b, idx) => (
+              <div key={idx} style={{ display: "flex", alignItems: "center", gap: 12, ...mono, fontSize: 12, borderBottom: idx < backSteps.length - 1 ? "1px solid #141d2d" : "none", paddingBottom: idx < backSteps.length - 1 ? 8 : 0 }}>
+                <span style={{ color: "#00d4ff", fontWeight: 700, minWidth: 32 }}>{b.variable}</span>
+                <span style={{ color: "var(--color-text-muted)" }}>=</span>
+                <span style={{ color: "var(--color-text-bright)", flex: 1 }}>{b.formula}</span>
+                <span style={{ color: "var(--color-text-muted)" }}>=</span>
+                <span style={{ color: "#10b981", fontWeight: 700, background: "#10b98115", padding: "2px 8px", borderRadius: 4 }}>{b.value.toFixed(8)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LUStepsView({
+  L,
+  U,
+  forwardSteps,
+  backSteps,
+  color
+}: {
+  L: number[][];
+  U: number[][];
+  forwardSteps?: { variable: string; formula: string; value: number }[];
+  backSteps?: { variable: string; formula: string; value: number }[];
+  color: string;
+}) {
+  return (
+    <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 14, paddingRight: 4 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <SectionLabel>Factorización A = L · U</SectionLabel>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div style={{ background: "#0b101b", border: "1px solid var(--color-border)", borderRadius: 7, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+            <span style={{ ...mono, fontSize: 11, fontWeight: 700, color: "#3b82f6" }}>Matriz L (Triangular Inferior)</span>
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              <SimpleMatrixView matrix={L} highlightColor="#3b82f6" />
+            </div>
+          </div>
+          <div style={{ background: "#0b101b", border: "1px solid var(--color-border)", borderRadius: 7, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+            <span style={{ ...mono, fontSize: 11, fontWeight: 700, color: color }}>Matriz U (Triangular Superior)</span>
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              <SimpleMatrixView matrix={U} highlightColor={color} />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        {forwardSteps && forwardSteps.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <SectionLabel>1. Sustitución progresiva (L·y = P·b)</SectionLabel>
+            <div style={{ background: "#0b101b", border: "1px solid var(--color-border)", borderRadius: 7, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+              {forwardSteps.map((b, idx) => (
+                <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, ...mono, fontSize: 11 }}>
+                  <span style={{ color: "#3b82f6", fontWeight: 700, minWidth: 24 }}>{b.variable}</span>
+                  <span style={{ color: "var(--color-text-muted)" }}>=</span>
+                  <span style={{ color: "var(--color-text-bright)", flex: 1, fontSize: 10 }}>{b.formula}</span>
+                  <span style={{ color: "#10b981", fontWeight: 700 }}>= {b.value.toFixed(6)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {backSteps && backSteps.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <SectionLabel>2. Sustitución regresiva (U·x = y)</SectionLabel>
+            <div style={{ background: "#0b101b", border: "1px solid var(--color-border)", borderRadius: 7, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+              {backSteps.map((b, idx) => (
+                <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, ...mono, fontSize: 11 }}>
+                  <span style={{ color: "#00d4ff", fontWeight: 700, minWidth: 24 }}>{b.variable}</span>
+                  <span style={{ color: "var(--color-text-muted)" }}>=</span>
+                  <span style={{ color: "var(--color-text-bright)", flex: 1, fontSize: 10 }}>{b.formula}</span>
+                  <span style={{ color: "#10b981", fontWeight: 700 }}>= {b.value.toFixed(6)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -386,33 +669,157 @@ const CS = {
   grid: { strokeDasharray: "2 4", stroke: "#1c2538" },
 };
 
-function FnChart({ plotData, root }: { plotData: { x: number; y: number }[]; root?: number }) {
+function FnChart({
+  plotData,
+  root,
+  x0,
+  a,
+  b,
+  isIntegration = false
+}: {
+  plotData: { x: number; y: number }[];
+  root?: number;
+  x0?: number;
+  a?: number;
+  b?: number;
+  isIntegration?: boolean;
+}) {
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <LineChart data={plotData} margin={{ top: 8, right: 12, left: -10, bottom: 8 }}>
+      <LineChart data={plotData} margin={{ top: 12, right: 16, left: -5, bottom: 8 }}>
         <CartesianGrid {...CS.grid} />
-        <XAxis dataKey="x" {...CS.axis} tickFormatter={(v: number) => v.toFixed(2)} />
-        <YAxis {...CS.axis} tickFormatter={(v: number) => v.toFixed(2)} />
-        <ReferenceLine y={0} stroke="#2a3550" />
-        {root !== undefined && <ReferenceLine x={root} stroke="#00d4ff" strokeDasharray="4 2" strokeWidth={1.5} label={{ value: "x*", position: "top", fill: "#00d4ff", fontSize: 11, fontFamily: "var(--font-mono)" }} />}
-        <Tooltip contentStyle={CS.tooltip} formatter={(v: number) => [v.toFixed(6), "f(x)"]} />
-        <Line type="monotone" dataKey="y" stroke="#00d4ff" strokeWidth={2} dot={false} />
+        <XAxis
+          dataKey="x"
+          type="number"
+          domain={['dataMin', 'dataMax']}
+          {...CS.axis}
+          tickFormatter={(v: number) => typeof v === "number" ? v.toFixed(1) : String(v)}
+          interval="preserveStartEnd"
+          minTickGap={45}
+        />
+        <YAxis
+          {...CS.axis}
+          tickFormatter={(v: number) => typeof v === "number" ? (Math.abs(v) < 0.01 && v !== 0 ? v.toExponential(1) : v.toFixed(2)) : String(v)}
+        />
+        <ReferenceLine y={0} stroke="#3b4a68" strokeWidth={1.5} />
+        {x0 !== undefined && Number.isFinite(x0) && (
+          <ReferenceLine
+            x={x0}
+            stroke="#f59e0b"
+            strokeDasharray="3 3"
+            strokeWidth={1.5}
+            label={{ value: `x₀=${x0}`, position: "top", fill: "#f59e0b", fontSize: 10, fontFamily: "var(--font-mono)" }}
+          />
+        )}
+        {root !== undefined && Number.isFinite(root) && (
+          <ReferenceLine
+            x={root}
+            stroke="#00d4ff"
+            strokeDasharray="4 2"
+            strokeWidth={2}
+            label={{ value: `x*≈${root.toFixed(3)}`, position: "insideTopRight", fill: "#00d4ff", fontSize: 11, fontWeight: 700, fontFamily: "var(--font-mono)" }}
+          />
+        )}
+        {isIntegration && a !== undefined && Number.isFinite(a) && (
+          <ReferenceLine x={a} stroke="#f97316" strokeDasharray="3 3" strokeWidth={1.5} label={{ value: `a=${a}`, position: "top", fill: "#f97316", fontSize: 10, fontFamily: "var(--font-mono)" }} />
+        )}
+        {isIntegration && b !== undefined && Number.isFinite(b) && (
+          <ReferenceLine x={b} stroke="#f97316" strokeDasharray="3 3" strokeWidth={1.5} label={{ value: `b=${b}`, position: "top", fill: "#f97316", fontSize: 10, fontFamily: "var(--font-mono)" }} />
+        )}
+        <Tooltip
+          contentStyle={CS.tooltip}
+          formatter={(v: unknown) => [typeof v === "number" ? v.toFixed(6) : String(v ?? ""), "f(x)"]}
+          labelFormatter={(l: unknown) => `x = ${typeof l === "number" ? l.toFixed(4) : l}`}
+        />
+        <Line type="monotone" dataKey="y" stroke="#00d4ff" strokeWidth={2} dot={false} isAnimationActive={false} />
       </LineChart>
     </ResponsiveContainer>
   );
 }
 
 function ConvChart({ iterations, color }: { iterations: Iteration[]; color: string }) {
-  const data = iterations.filter(r => typeof r.error === "number" && (r.error as number) > 0).map(r => ({ n: r.n, error: Math.abs(r.error as number) }));
+  const data = iterations
+    .filter(r => typeof r.error === "number" && (r.error as number) > 0)
+    .map(r => ({ n: r.n, error: Math.abs(r.error as number) }));
   if (data.length < 2) return <p style={{ ...mono, fontSize: 11, color: "var(--color-text-muted)" }}>Datos insuficientes para graficar la convergencia.</p>;
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <LineChart data={data} margin={{ top: 8, right: 12, left: -10, bottom: 8 }}>
+      <LineChart data={data} margin={{ top: 12, right: 16, left: 5, bottom: 8 }}>
         <CartesianGrid {...CS.grid} />
-        <XAxis dataKey="n" {...CS.axis} />
-        <YAxis scale="log" domain={["auto","auto"]} {...CS.axis} tickFormatter={(v: number) => v.toExponential(0)} />
-        <Tooltip contentStyle={CS.tooltip} formatter={(v: number) => [v.toExponential(4), "Error"]} />
-        <Line type="monotone" dataKey="error" stroke={color} strokeWidth={2} dot={false} />
+        <XAxis
+          dataKey="n"
+          {...CS.axis}
+          allowDecimals={false}
+          tickFormatter={(v: number) => `Iter ${v}`}
+          interval={0}
+          minTickGap={25}
+        />
+        <YAxis scale="log" domain={["auto","auto"]} {...CS.axis} tickFormatter={(v: number) => typeof v === "number" ? v.toExponential(0) : String(v)} />
+        <Tooltip
+          contentStyle={CS.tooltip}
+          formatter={(v: unknown) => [typeof v === "number" ? v.toExponential(4) : String(v ?? ""), "Error"]}
+          labelFormatter={(l: unknown) => `Iteración ${l}`}
+        />
+        <Line
+          type="monotone"
+          dataKey="error"
+          stroke={color}
+          strokeWidth={2.5}
+          dot={{ fill: color, r: 4, stroke: "#0e1321", strokeWidth: 1.5 }}
+          activeDot={{ r: 6, fill: "#ffffff", stroke: color, strokeWidth: 2 }}
+          isAnimationActive={false}
+        />
+      </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
+function InterpChart({
+  plotData,
+  xs,
+  ys,
+  xq,
+  yq,
+  color
+}: {
+  plotData: { x: number; y: number }[];
+  xs: number[];
+  ys: number[];
+  xq?: number;
+  yq?: number;
+  color: string;
+}) {
+  const pts = xs.map((x, i) => ({ x, y: ys[i] }));
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <LineChart margin={{ top: 12, right: 16, left: -5, bottom: 8 }}>
+        <CartesianGrid {...CS.grid} />
+        <XAxis
+          dataKey="x"
+          type="number"
+          domain={["auto","auto"]}
+          {...CS.axis}
+          tickFormatter={(v: number) => typeof v === "number" ? v.toFixed(1) : String(v)}
+          interval="preserveStartEnd"
+          minTickGap={40}
+        />
+        <YAxis {...CS.axis} tickFormatter={(v: number) => typeof v === "number" ? v.toFixed(2) : String(v)} />
+        <ReferenceLine y={0} stroke="#3b4a68" />
+        {xq !== undefined && Number.isFinite(xq) && (
+          <ReferenceLine
+            x={xq}
+            stroke="#f59e0b"
+            strokeDasharray="4 2"
+            strokeWidth={1.5}
+            label={{ value: `xq = ${xq}`, position: "top", fill: "#f59e0b", fontSize: 10, fontFamily: "var(--font-mono)" }}
+          />
+        )}
+        <Tooltip contentStyle={CS.tooltip} labelFormatter={(l: unknown) => `x = ${typeof l === "number" ? l.toFixed(3) : l}`} />
+        <Line data={plotData} type="monotone" dataKey="y" stroke={color} strokeWidth={2} dot={false} name="Curva interpolante" isAnimationActive={false} />
+        <Line data={pts} type="linear" dataKey="y" stroke="transparent" dot={{ fill: "#00d4ff", r: 5, stroke: "#0e1321", strokeWidth: 1.5 }} name="Nodos (xi, yi)" isAnimationActive={false} />
+        {xq !== undefined && yq !== undefined && Number.isFinite(xq) && Number.isFinite(yq) && (
+          <Line data={[{ x: xq, y: yq }]} type="linear" dataKey="y" stroke="transparent" dot={{ fill: "#f59e0b", r: 7, stroke: "#ffffff", strokeWidth: 2 }} name="P(xq) evaluado" isAnimationActive={false} />
+        )}
       </LineChart>
     </ResponsiveContainer>
   );
@@ -424,13 +831,13 @@ function RegChart({ xs, ys, m, b }: { xs: number[]; ys: number[]; m: number; b: 
   const line = [{ x: mn, y: m * mn + b }, { x: mx, y: m * mx + b }];
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <LineChart margin={{ top: 8, right: 12, left: -10, bottom: 8 }}>
+      <LineChart margin={{ top: 12, right: 16, left: -5, bottom: 8 }}>
         <CartesianGrid {...CS.grid} />
-        <XAxis dataKey="x" type="number" {...CS.axis} domain={["auto","auto"]} />
+        <XAxis dataKey="x" type="number" {...CS.axis} domain={["auto","auto"]} interval="preserveStartEnd" minTickGap={40} />
         <YAxis {...CS.axis} />
         <Tooltip contentStyle={CS.tooltip} />
-        <Line data={line} type="linear" dataKey="y" stroke="#f59e0b" strokeWidth={2} dot={false} name="y = mx + b" />
-        <Line data={pts} type="linear" dataKey="y" stroke="transparent" dot={{ fill: "#00d4ff", r: 5, stroke: "#00d4ff" }} name="Datos" />
+        <Line data={line} type="linear" dataKey="y" stroke="#f59e0b" strokeWidth={2} dot={false} name="y = mx + b" isAnimationActive={false} />
+        <Line data={pts} type="linear" dataKey="y" stroke="transparent" dot={{ fill: "#00d4ff", r: 5, stroke: "#00d4ff" }} name="Datos" isAnimationActive={false} />
       </LineChart>
     </ResponsiveContainer>
   );
@@ -439,12 +846,12 @@ function RegChart({ xs, ys, m, b }: { xs: number[]; ys: number[]; m: number; b: 
 function DiffBars({ formulas, color }: { formulas: { name: string; value: number }[]; color: string }) {
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={formulas} margin={{ top: 8, right: 12, left: -10, bottom: 8 }}>
+      <BarChart data={formulas} margin={{ top: 12, right: 16, left: -10, bottom: 8 }}>
         <CartesianGrid {...CS.grid} />
         <XAxis dataKey="name" {...CS.axis} />
         <YAxis {...CS.axis} domain={["auto","auto"]} />
-        <Tooltip contentStyle={CS.tooltip} formatter={(v: number) => [v.toFixed(8), "f′(x)"]} />
-        <Bar dataKey="value" name="f′(x)" radius={[3,3,0,0]}>
+        <Tooltip contentStyle={CS.tooltip} formatter={(v: unknown) => [typeof v === "number" ? v.toFixed(8) : String(v ?? ""), "f′(x)"]} />
+        <Bar dataKey="value" name="f′(x)" radius={[3,3,0,0]} isAnimationActive={false}>
           {formulas.map((_, i) => <Cell key={i} fill={i === 2 ? color : color + "77"} />)}
         </Bar>
       </BarChart>
@@ -456,47 +863,186 @@ function DiffBars({ formulas, color }: { formulas: { name: string; value: number
 
 function GraphsTab({ result, methodId, p, color }: { result: MethodResult; methodId: string; p: Record<string, string>; color: string }) {
   const cat = getCat(methodId)?.id ?? "";
+  const methodName = getMethodMeta(methodId)?.name ?? "Metodo";
+  const isRootOrInt = ["roots", "integration"].includes(cat);
+
+  const fnChartRef = useRef<HTMLDivElement>(null);
+  const interpChartRef = useRef<HTMLDivElement>(null);
+  const diffChartRef = useRef<HTMLDivElement>(null);
+  const regChartRef = useRef<HTMLDivElement>(null);
+  const convChartRef = useRef<HTMLDivElement>(null);
+
   const plotData = useMemo(() => {
-    if (!["roots","integration"].includes(cat)) return null;
+    if (!isRootOrInt) return null;
     const expr = p.expr ?? p.fExpr ?? "";
     if (!expr) return null;
-    const a = parseFloat(p.a ?? (parseFloat(p.x0 ?? "-5") - 3).toString());
-    const b = parseFloat(p.b ?? (parseFloat(p.x1 ?? p.x0 ?? "5") + 3).toString());
-    return buildPlotData(expr, isNaN(a) ? -5 : a - 0.5, isNaN(b) ? 5 : b + 0.5);
-  }, [cat, p]);
 
+    // Collect all relevant domain anchor points
+    const xPoints: number[] = [];
+    if (typeof result.root === "number" && Number.isFinite(result.root)) xPoints.push(result.root);
+    if (p.x0 !== undefined) { const v = parseFloat(p.x0); if (Number.isFinite(v)) xPoints.push(v); }
+    if (p.x1 !== undefined) { const v = parseFloat(p.x1); if (Number.isFinite(v)) xPoints.push(v); }
+    if (p.a !== undefined) { const v = parseFloat(p.a); if (Number.isFinite(v)) xPoints.push(v); }
+    if (p.b !== undefined) { const v = parseFloat(p.b); if (Number.isFinite(v)) xPoints.push(v); }
+    result.iterations.forEach(it => {
+      if (typeof it.x === "number" && Number.isFinite(it.x)) xPoints.push(it.x);
+      if (typeof it.x_n === "number" && Number.isFinite(it.x_n)) xPoints.push(it.x_n);
+      if (typeof it["x_{n+1}"] === "number" && Number.isFinite(it["x_{n+1}"] as number)) xPoints.push(it["x_{n+1}"] as number);
+      if (typeof it.c === "number" && Number.isFinite(it.c)) xPoints.push(it.c);
+    });
+
+    let minX = xPoints.length ? Math.min(...xPoints) : -5;
+    let maxX = xPoints.length ? Math.max(...xPoints) : 5;
+    if (minX === maxX) { minX -= 3; maxX += 3; }
+    const span = Math.max(1, maxX - minX);
+    let pMin = minX - span * 0.25;
+    let pMax = maxX + span * 0.25;
+
+    // Safeguard for logarithmic and square root domains
+    const isLog = /\b(ln|log)\b/i.test(expr);
+    const isSqrt = /\bsqrt\b/i.test(expr);
+    if ((isLog || isSqrt) && pMin <= 0) {
+      pMin = Math.max(0.01, minX > 0 ? minX * 0.5 : 0.01);
+    }
+
+    return buildPlotData(expr, pMin, pMax, 300);
+  }, [cat, p, result, isRootOrInt]);
+
+  const x0Val = p.x0 !== undefined ? parseFloat(p.x0) : undefined;
+  const aVal = p.a !== undefined ? parseFloat(p.a) : undefined;
+  const bVal = p.b !== undefined ? parseFloat(p.b) : undefined;
+
+  const hasInterpPlot = ["lagrange", "newton-interp", "spline"].includes(methodId) && !!result.plotData?.length;
   const hasDiffFormulas = !!(result.extra?.formulas as unknown[])?.length;
   const hasConv = result.iterations.some(r => typeof r.error === "number" && (r.error as number) > 0);
-  const numCharts = (plotData ? 1 : 0) + (hasDiffFormulas ? 1 : 0) + (methodId === "linear-reg" ? 1 : 0) + (hasConv ? 1 : 0);
+
+  const numCharts = (plotData ? 1 : 0) + (hasInterpPlot ? 1 : 0) + (hasDiffFormulas ? 1 : 0) + (methodId === "linear-reg" ? 1 : 0) + (hasConv ? 1 : 0);
   const cols = numCharts >= 2 ? "1fr 1fr" : "1fr";
 
+  const safeMethodName = methodName.replace(/[^\w\s-]/g, "").replace(/\s+/g, "_");
+
   return (
-    <div style={{ display: "grid", gridTemplateColumns: cols, gap: 12, flex: 1, minHeight: 0 }}>
+    <div style={{ display: "grid", gridTemplateColumns: cols, gap: 14, flex: 1, minHeight: 0 }}>
       {plotData && (
         <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
-          <SectionLabel>Gráfica de f(x)</SectionLabel>
-          <div style={{ flex: 1, minHeight: 200 }}><FnChart plotData={plotData} root={result.root} /></div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+            <SectionLabel>{cat === "integration" ? "Función a integrar f(x)" : "Gráfica de f(x)"}</SectionLabel>
+            <button
+              onClick={() => exportChartToPng(fnChartRef.current, `NumLab_${safeMethodName}_fx.png`)}
+              style={{
+                background: "#0c1322", border: "1px solid var(--color-border)", borderRadius: 4,
+                padding: "2px 8px", color: "var(--color-text-muted)", ...ui, fontSize: 10, cursor: "pointer",
+                display: "inline-flex", alignItems: "center", gap: 4, transition: "all 0.15s"
+              }}
+              title="Descargar gráfica como imagen PNG en alta definición"
+            >
+              <span>📥</span> Descargar PNG
+            </button>
+          </div>
+          <div ref={fnChartRef} style={{ flex: 1, minHeight: 220 }}>
+            <FnChart
+              plotData={plotData}
+              root={result.root}
+              x0={x0Val}
+              a={aVal}
+              b={bVal}
+              isIntegration={cat === "integration"}
+            />
+          </div>
+        </div>
+      )}
+      {hasInterpPlot && result.extra && (
+        <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+            <SectionLabel>Curva interpolante y puntos</SectionLabel>
+            <button
+              onClick={() => exportChartToPng(interpChartRef.current, `NumLab_${safeMethodName}_Interpolacion.png`)}
+              style={{
+                background: "#0c1322", border: "1px solid var(--color-border)", borderRadius: 4,
+                padding: "2px 8px", color: "var(--color-text-muted)", ...ui, fontSize: 10, cursor: "pointer",
+                display: "inline-flex", alignItems: "center", gap: 4, transition: "all 0.15s"
+              }}
+              title="Descargar gráfica de interpolación en PNG"
+            >
+              <span>📥</span> Descargar PNG
+            </button>
+          </div>
+          <div ref={interpChartRef} style={{ flex: 1, minHeight: 220 }}>
+            <InterpChart
+              plotData={result.plotData!}
+              xs={(result.extra.xs as number[]) ?? []}
+              ys={(result.extra.ys as number[]) ?? []}
+              xq={result.extra.xq as number | undefined}
+              yq={result.extra.yq as number | undefined}
+              color={color}
+            />
+          </div>
         </div>
       )}
       {hasDiffFormulas && (
         <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
-          <SectionLabel>Comparación de fórmulas — f′(x₀)</SectionLabel>
-          <div style={{ flex: 1, minHeight: 200 }}><DiffBars formulas={result.extra!.formulas as { name: string; value: number }[]} color={color} /></div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+            <SectionLabel>Comparación de fórmulas — f′(x₀)</SectionLabel>
+            <button
+              onClick={() => exportChartToPng(diffChartRef.current, `NumLab_${safeMethodName}_Diferenciacion.png`)}
+              style={{
+                background: "#0c1322", border: "1px solid var(--color-border)", borderRadius: 4,
+                padding: "2px 8px", color: "var(--color-text-muted)", ...ui, fontSize: 10, cursor: "pointer",
+                display: "inline-flex", alignItems: "center", gap: 4, transition: "all 0.15s"
+              }}
+              title="Descargar gráfica de diferenciación en PNG"
+            >
+              <span>📥</span> Descargar PNG
+            </button>
+          </div>
+          <div ref={diffChartRef} style={{ flex: 1, minHeight: 220 }}>
+            <DiffBars formulas={result.extra!.formulas as { name: string; value: number }[]} color={color} />
+          </div>
         </div>
       )}
       {methodId === "linear-reg" && result.extra && (
         <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
-          <SectionLabel>Recta de regresión</SectionLabel>
-          <div style={{ flex: 1, minHeight: 200 }}><RegChart xs={p.xs?.split(",").map(Number) ?? []} ys={p.ys?.split(",").map(Number) ?? []} m={result.extra.m as number} b={result.extra.b as number} /></div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+            <SectionLabel>Recta de regresión y datos</SectionLabel>
+            <button
+              onClick={() => exportChartToPng(regChartRef.current, `NumLab_Regresion_Lineal.png`)}
+              style={{
+                background: "#0c1322", border: "1px solid var(--color-border)", borderRadius: 4,
+                padding: "2px 8px", color: "var(--color-text-muted)", ...ui, fontSize: 10, cursor: "pointer",
+                display: "inline-flex", alignItems: "center", gap: 4, transition: "all 0.15s"
+              }}
+              title="Descargar gráfica de regresión en PNG"
+            >
+              <span>📥</span> Descargar PNG
+            </button>
+          </div>
+          <div ref={regChartRef} style={{ flex: 1, minHeight: 220 }}>
+            <RegChart xs={p.xs?.split(",").map(Number) ?? []} ys={p.ys?.split(",").map(Number) ?? []} m={result.extra.m as number} b={result.extra.b as number} />
+          </div>
         </div>
       )}
       {hasConv && (
         <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
-          <SectionLabel>Convergencia del error</SectionLabel>
-          <div style={{ flex: 1, minHeight: 200 }}><ConvChart iterations={result.iterations} color={color} /></div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+            <SectionLabel>Convergencia del error</SectionLabel>
+            <button
+              onClick={() => exportChartToPng(convChartRef.current, `NumLab_${safeMethodName}_Convergencia.png`)}
+              style={{
+                background: "#0c1322", border: "1px solid var(--color-border)", borderRadius: 4,
+                padding: "2px 8px", color: "var(--color-text-muted)", ...ui, fontSize: 10, cursor: "pointer",
+                display: "inline-flex", alignItems: "center", gap: 4, transition: "all 0.15s"
+              }}
+              title="Descargar gráfica de convergencia en PNG"
+            >
+              <span>📥</span> Descargar PNG
+            </button>
+          </div>
+          <div ref={convChartRef} style={{ flex: 1, minHeight: 220 }}>
+            <ConvChart iterations={result.iterations} color={color} />
+          </div>
         </div>
       )}
-      {!plotData && !hasDiffFormulas && methodId !== "linear-reg" && !hasConv && (
+      {!plotData && !hasInterpPlot && !hasDiffFormulas && methodId !== "linear-reg" && !hasConv && (
         <p style={{ ...mono, fontSize: 12, color: "var(--color-text-muted)" }}>No hay gráficas disponibles para este método.</p>
       )}
     </div>
@@ -518,6 +1064,10 @@ function ResultPanel({ result, methodId, p, color }: { result: MethodResult | nu
     );
   }
 
+  const methodName = getMethodMeta(methodId)?.name ?? "Metodo";
+  const isLinearStepMethod = methodId === "gaussian" || methodId === "lu";
+  const tableTabLabel = isLinearStepMethod ? "Pasos de resolución" : "Tabla de iteraciones";
+
   return (
     <div style={{ flex: 1, background: "var(--color-panel)", border: "1px solid var(--color-border)", borderRadius: 8, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
       {/* Summary strip */}
@@ -534,13 +1084,31 @@ function ResultPanel({ result, methodId, p, color }: { result: MethodResult | nu
             ...ui, fontSize: 12, fontWeight: tab === t ? 600 : 400,
             color: tab === t ? color : "var(--color-text-muted)", transition: "all 0.15s", marginBottom: -1,
           }}>
-            {t === "table" ? "Tabla de iteraciones" : "Gráficas"}
+            {t === "table" ? tableTabLabel : "Gráficas"}
           </button>
         ))}
       </div>
       {/* Content */}
       <div style={{ flex: 1, overflow: "hidden", padding: 14, display: "flex", flexDirection: "column", minHeight: 0 }}>
-        {tab === "table" && <IterTable iterations={result.iterations} />}
+        {tab === "table" && (
+          methodId === "gaussian" && result.extra?.matrixSteps ? (
+            <GaussianStepsView
+              matrixSteps={result.extra.matrixSteps as { step: number; operation: string; factor?: number; matrix: number[][] }[]}
+              backSteps={result.extra.backSteps as { variable: string; formula: string; value: number }[]}
+              color={color}
+            />
+          ) : methodId === "lu" && result.extra?.L ? (
+            <LUStepsView
+              L={result.extra.L as number[][]}
+              U={result.extra.U as number[][]}
+              forwardSteps={result.extra.forwardSteps as { variable: string; formula: string; value: number }[]}
+              backSteps={result.extra.backSteps as { variable: string; formula: string; value: number }[]}
+              color={color}
+            />
+          ) : (
+            <IterTable iterations={result.iterations} methodName={methodName} />
+          )
+        )}
         {tab === "graph" && <GraphsTab result={result} methodId={methodId} p={p} color={color} />}
       </div>
     </div>
@@ -678,7 +1246,8 @@ export default function App() {
       } else if (view === "fixed-point") {
         res = fixedPoint(validateExpression(p.fExpr, "f(x)"), validateExpression(p.gExpr, "g(x)"), parseFiniteInput(p.x0, "x₀"), tol, maxIter);
       } else if (view === "newton") {
-        res = newtonRaphson(validateExpression(p.expr), parseFiniteInput(p.x0, "x₀"), tol, maxIter);
+        const dExpr = p.dExpr?.trim();
+        res = newtonRaphson(validateExpression(p.expr), parseFiniteInput(p.x0, "x₀"), tol, maxIter, dExpr && dExpr.length > 0 ? validateExpression(p.dExpr, "f'(x)") : undefined);
       } else if (view === "secant") {
         res = secant(validateExpression(p.expr), parseFiniteInput(p.x0, "x₀"), parseFiniteInput(p.x1, "x₁"), tol, maxIter);
       } else if (view === "gaussian" || view === "lu" || view === "gauss-seidel") {
