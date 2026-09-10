@@ -14,6 +14,7 @@ import {
 } from "./lib/methods";
 import { isValidExpr } from "./lib/mathEval";
 import { exportTableToCSV, copyTableToClipboard, copyTableToLatex, exportChartToPng } from "./lib/exportUtils";
+import { checkForUpdates, type UpdateInfo, APP_VERSION } from "./lib/updater";
 import MathExpressionInput from "./components/MathExpressionInput";
 import logo from "./logo.png";
 import icon from "./icon.png";
@@ -717,18 +718,57 @@ function LUStepsView({
   U,
   forwardSteps,
   backSteps,
-  color
+  hadPivoting,
+  pivotingSteps,
+  permutation,
+  permutedB,
+  isVerified,
+  color,
 }: {
   L: number[][];
   U: number[][];
   forwardSteps?: { variable: string; formula: string; value: number }[];
   backSteps?: { variable: string; formula: string; value: number }[];
+  hadPivoting?: boolean;
+  pivotingSteps?: string[];
+  permutation?: number[];
+  permutedB?: number[];
+  isVerified?: boolean;
   color: string;
 }) {
   return (
     <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 14, paddingRight: 4 }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <SectionLabel>Factorización A = L · U</SectionLabel>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+          <SectionLabel>
+            {hadPivoting ? "Factorización P · A = L · U (con intercambio de filas)" : "Factorización A = L · U"}
+          </SectionLabel>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {isVerified && (
+              <span style={{ ...mono, fontSize: 10, color: "#10b981", background: "#10b98115", border: "1px solid #10b98133", padding: "2px 8px", borderRadius: 4 }}>
+                ✓ Verificación: L · U = {hadPivoting ? "P · A" : "A"}
+              </span>
+            )}
+            <span style={{ ...mono, fontSize: 10, color: hadPivoting ? "#f59e0b" : "#3b82f6", background: hadPivoting ? "#f59e0b15" : "#3b82f615", border: `1px solid ${hadPivoting ? "#f59e0b33" : "#3b82f633"}`, padding: "2px 8px", borderRadius: 4 }}>
+              {hadPivoting ? "Con intercambio de filas" : "Sin intercambio"}
+            </span>
+          </div>
+        </div>
+
+        {hadPivoting && pivotingSteps && pivotingSteps.length > 0 && (
+          <div style={{ background: "#0b101b", border: "1px solid #f59e0b33", borderRadius: 7, padding: "8px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, ...mono, fontSize: 11 }}>
+              <span style={{ color: "#f59e0b", fontWeight: 700 }}>Pivoteo parcial:</span>
+              <span style={{ color: "var(--color-text-bright)" }}>{pivotingSteps.join(", ")}</span>
+            </div>
+            {permutation && (
+              <span style={{ ...mono, fontSize: 10, color: "var(--color-text-muted)" }}>
+                Vector de permutación P = [{permutation.map(i => i + 1).join(", ")}]
+              </span>
+            )}
+          </div>
+        )}
+
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <div style={{ background: "#0b101b", border: "1px solid var(--color-border)", borderRadius: 7, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
             <span style={{ ...mono, fontSize: 11, fontWeight: 700, color: "#3b82f6" }}>Matriz L (Triangular Inferior)</span>
@@ -748,7 +788,14 @@ function LUStepsView({
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         {forwardSteps && forwardSteps.length > 0 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <SectionLabel>1. Sustitución progresiva (L·y = P·b)</SectionLabel>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 4 }}>
+              <SectionLabel>1. Sustitución progresiva ({hadPivoting ? "L · y = P · b" : "L · y = b"})</SectionLabel>
+              {hadPivoting && permutedB && (
+                <span style={{ ...mono, fontSize: 10, color: "#f59e0b" }}>
+                  P·b = [{permutedB.map(v => v.toFixed(2)).join(", ")}]
+                </span>
+              )}
+            </div>
             <div style={{ background: "#0b101b", border: "1px solid var(--color-border)", borderRadius: 7, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
               {forwardSteps.map((b, idx) => (
                 <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, ...mono, fontSize: 11 }}>
@@ -764,7 +811,7 @@ function LUStepsView({
 
         {backSteps && backSteps.length > 0 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <SectionLabel>2. Sustitución regresiva (U·x = y)</SectionLabel>
+            <SectionLabel>2. Sustitución regresiva (U · x = y)</SectionLabel>
             <div style={{ background: "#0b101b", border: "1px solid var(--color-border)", borderRadius: 7, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
               {backSteps.map((b, idx) => (
                 <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, ...mono, fontSize: 11 }}>
@@ -1343,6 +1390,11 @@ function ResultPanel({
               U={result.extra.U as number[][]}
               forwardSteps={result.extra.forwardSteps as { variable: string; formula: string; value: number }[]}
               backSteps={result.extra.backSteps as { variable: string; formula: string; value: number }[]}
+              hadPivoting={result.extra.hadPivoting as boolean | undefined}
+              pivotingSteps={result.extra.pivotingSteps as string[] | undefined}
+              permutation={result.extra.permutation as number[] | undefined}
+              permutedB={result.extra.permutedB as number[] | undefined}
+              isVerified={result.extra.isVerified as boolean | undefined}
               color={color}
             />
           ) : methodId === "gauss-seidel" ? (
@@ -1410,21 +1462,195 @@ function HomeScreen({ onSelect }: { onSelect: (id: string) => void }) {
   );
 }
 
-function AboutScreen() {
+function ReleaseNotesModal({
+  info,
+  onClose,
+}: {
+  info: UpdateInfo;
+  onClose: () => void;
+}) {
+  return (
+    <div style={{
+      position: "fixed",
+      inset: 0,
+      background: "rgba(0, 0, 0, 0.75)",
+      backdropFilter: "blur(5px)",
+      zIndex: 10000,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 20,
+    }}>
+      <div style={{
+        background: "#0c1322",
+        border: "1px solid var(--color-border)",
+        borderRadius: 10,
+        width: "100%",
+        maxWidth: 620,
+        maxHeight: "85vh",
+        display: "flex",
+        flexDirection: "column",
+        boxShadow: "0 20px 50px rgba(0, 0, 0, 0.6)",
+        overflow: "hidden",
+      }}>
+        <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--color-border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <h3 style={{ ...ui, fontSize: 16, margin: 0, color: "var(--color-text-bright)" }}>
+              🚀 Novedades de NumLab {info.latestVersion}
+            </h3>
+            <span style={{ ...mono, fontSize: 11, color: "var(--color-cyan)" }}>{info.releaseName}</span>
+          </div>
+          <button onClick={onClose} style={{ background: "transparent", border: "none", color: "var(--color-text-muted)", cursor: "pointer", fontSize: 18 }}>✕</button>
+        </div>
+        <div style={{ padding: "18px 20px", overflowY: "auto", flex: 1, ...ui, fontSize: 13, color: "var(--color-text)", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>
+          {info.releaseNotes || "Sin notas de versión disponibles."}
+        </div>
+        <div style={{ padding: "14px 20px", borderTop: "1px solid var(--color-border)", display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <button onClick={onClose} style={{ background: "#162035", border: "1px solid var(--color-border)", color: "var(--color-text)", padding: "7px 14px", borderRadius: 6, cursor: "pointer", ...ui, fontSize: 12 }}>
+            Cerrar
+          </button>
+          {info.downloadUrl && (
+            <a
+              href={info.downloadUrl}
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                background: "linear-gradient(135deg, #00d4ff 0%, #0099ff 100%)",
+                color: "#050914",
+                fontWeight: 700,
+                padding: "7px 16px",
+                borderRadius: 6,
+                textDecoration: "none",
+                ...ui,
+                fontSize: 12,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <span>📥</span> Descargar {info.fileName ?? "actualización"}
+            </a>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AboutScreen({
+  initialUpdateInfo,
+}: {
+  initialUpdateInfo?: UpdateInfo | null;
+}) {
+  const [checking, setChecking] = useState(false);
+  const [updateResult, setUpdateResult] = useState<UpdateInfo | null>(initialUpdateInfo ?? null);
+
+  const handleCheck = async () => {
+    setChecking(true);
+    const res = await checkForUpdates(APP_VERSION);
+    setChecking(false);
+    setUpdateResult(res);
+  };
+
   return (
     <div style={{ flex: 1, padding: "34px 44px", overflowY: "auto" }}>
-      <div style={{ maxWidth: 760 }}>
-        <img src={logo} alt="NumLab" style={{ width: "min(430px, 70vw)", height: "auto", display: "block", marginBottom: 28 }} />
-        <p style={{ ...mono, fontSize: 10, color: "var(--color-cyan)", letterSpacing: "0.15em", textTransform: "uppercase", margin: "0 0 8px" }}>Acerca de</p>
-        <h1 style={{ ...ui, fontSize: 30, color: "var(--color-text-bright)", margin: "0 0 14px" }}>Una herramienta para aprender haciendo</h1>
-        <p style={{ ...ui, fontSize: 15, lineHeight: 1.7, color: "var(--color-text)", margin: "0 0 26px" }}>
-          NumLab es una calculadora interactiva de métodos numéricos. Permite explorar raíces de ecuaciones, sistemas lineales, interpolación, ajuste de curvas, diferenciación e integración numérica mediante sus parámetros, tablas de iteraciones y gráficas.
-        </p>
+      <div style={{ maxWidth: 760, display: "flex", flexDirection: "column", gap: 20 }}>
+        <div>
+          <img src={logo} alt="NumLab" style={{ width: "min(430px, 70vw)", height: "auto", display: "block", marginBottom: 20 }} />
+          <p style={{ ...mono, fontSize: 10, color: "var(--color-cyan)", letterSpacing: "0.15em", textTransform: "uppercase", margin: "0 0 8px" }}>Acerca de</p>
+          <h1 style={{ ...ui, fontSize: 28, color: "var(--color-text-bright)", margin: "0 0 12px" }}>Una herramienta para aprender haciendo</h1>
+          <p style={{ ...ui, fontSize: 14, lineHeight: 1.7, color: "var(--color-text)", margin: 0 }}>
+            NumLab es una calculadora interactiva de métodos numéricos. Permite explorar raíces de ecuaciones, sistemas lineales, interpolación, ajuste de curvas, diferenciación e integración numérica mediante sus parámetros, tablas de iteraciones y gráficas.
+          </p>
+        </div>
+
+        {/* Update checker card */}
+        <div style={{ padding: "18px 20px", background: "var(--color-panel)", border: "1px solid var(--color-border)", borderRadius: 8, display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+            <div>
+              <p style={{ ...mono, fontSize: 10, color: "var(--color-cyan)", letterSpacing: "0.12em", textTransform: "uppercase", margin: "0 0 4px" }}>Versión del software</p>
+              <h3 style={{ ...ui, fontSize: 16, color: "var(--color-text-bright)", margin: 0 }}>
+                NumLab v{APP_VERSION}
+              </h3>
+            </div>
+            <button
+              onClick={handleCheck}
+              disabled={checking}
+              style={{
+                background: checking ? "#162035" : "linear-gradient(135deg, #00d4ff 0%, #0099ff 100%)",
+                color: checking ? "var(--color-text-muted)" : "#050914",
+                border: "none",
+                borderRadius: 6,
+                padding: "7px 16px",
+                ...ui,
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: checking ? "default" : "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                transition: "all 0.15s",
+              }}
+            >
+              <span>{checking ? "⏳" : "🔄"}</span>
+              {checking ? "Buscando..." : "Buscar actualizaciones"}
+            </button>
+          </div>
+
+          {updateResult && (
+            <div style={{
+              background: updateResult.available ? "#00d4ff15" : updateResult.error ? "#f43f5e15" : "#10b98115",
+              border: `1px solid ${updateResult.available ? "#00d4ff44" : updateResult.error ? "#f43f5e44" : "#10b98144"}`,
+              borderRadius: 6,
+              padding: "12px 14px",
+              ...ui,
+              fontSize: 12,
+            }}>
+              {updateResult.available ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ fontWeight: 700, color: "var(--color-cyan)" }}>
+                    🚀 ¡Nueva versión disponible: {updateResult.latestVersion}!
+                  </div>
+                  <div style={{ color: "var(--color-text-muted)", fontSize: 11 }}>
+                    {updateResult.releaseName}
+                  </div>
+                  {updateResult.downloadUrl && (
+                    <a
+                      href={updateResult.downloadUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        alignSelf: "flex-start",
+                        background: "#00d4ff",
+                        color: "#050914",
+                        fontWeight: 700,
+                        padding: "6px 14px",
+                        borderRadius: 5,
+                        textDecoration: "none",
+                        fontSize: 11,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 5,
+                      }}
+                    >
+                      <span>📥</span> Descargar {updateResult.fileName?.endsWith(".dmg") ? "Instalador macOS (.dmg)" : updateResult.fileName?.endsWith(".exe") ? "Instalador Windows (.exe)" : "Actualización"}
+                    </a>
+                  )}
+                </div>
+              ) : updateResult.error ? (
+                <span style={{ color: "#f43f5e" }}>⚠ {updateResult.error}</span>
+              ) : (
+                <span style={{ color: "#10b981" }}>✓ NumLab está actualizado a la versión más reciente (v{APP_VERSION}).</span>
+              )}
+            </div>
+          )}
+        </div>
+
         <div style={{ display: "flex", alignItems: "center", gap: 18, padding: "18px 20px", background: "var(--color-panel)", border: "1px solid var(--color-border)", borderRadius: 8 }}>
-          <img src={icon} alt="Icono de NumLab" style={{ width: 76, height: 76, objectFit: "contain", flexShrink: 0 }} />
+          <img src={icon} alt="Icono de NumLab" style={{ width: 68, height: 68, objectFit: "contain", flexShrink: 0 }} />
           <div>
             <p style={{ ...mono, fontSize: 10, color: "var(--color-cyan)", letterSpacing: "0.12em", textTransform: "uppercase", margin: "0 0 6px" }}>Creador</p>
-            <h2 style={{ ...ui, fontSize: 20, color: "var(--color-text-bright)", margin: "0 0 5px" }}>Facundo Grillo</h2>
+            <h2 style={{ ...ui, fontSize: 18, color: "var(--color-text-bright)", margin: "0 0 5px" }}>Facundo Grillo</h2>
             <p style={{ ...ui, fontSize: 13, lineHeight: 1.5, color: "var(--color-text-muted)", margin: 0 }}>Estudiante de Ingeniería Informática en la Universidad Católica de Córdoba.</p>
           </div>
         </div>
@@ -1441,6 +1667,17 @@ export default function App() {
   const [params, setParams] = useState<Record<string, Record<string, string>>>(DEFAULTS);
   const [result, setResult] = useState<MethodResult | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [updateToastDismissed, setUpdateToastDismissed] = useState(false);
+  const [showReleaseModal, setShowReleaseModal] = useState(false);
+
+  useEffect(() => {
+    checkForUpdates(APP_VERSION).then(info => {
+      if (info.available) {
+        setUpdateInfo(info);
+      }
+    });
+  }, []);
 
   useEffect(() => {
     document.title = "NumLab | Métodos Numéricos";
@@ -1636,7 +1873,7 @@ export default function App() {
         {view === "home" ? (
           <HomeScreen onSelect={selectMethod} />
         ) : view === "about" ? (
-          <AboutScreen />
+          <AboutScreen initialUpdateInfo={updateInfo} />
         ) : (
           <>
             {/* Header */}
@@ -1670,6 +1907,97 @@ export default function App() {
           </>
         )}
       </div>
+
+      {/* Floating update toast */}
+      {updateInfo?.available && !updateToastDismissed && (
+        <div style={{
+          position: "fixed",
+          bottom: 22,
+          right: 22,
+          zIndex: 9999,
+          background: "#0c1322",
+          border: "1px solid #00d4ff55",
+          boxShadow: "0 10px 30px rgba(0, 0, 0, 0.6), 0 0 15px rgba(0, 212, 255, 0.2)",
+          borderRadius: 8,
+          padding: "14px 16px",
+          maxWidth: 380,
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 18 }}>🚀</span>
+              <div>
+                <div style={{ ...ui, fontWeight: 700, fontSize: 12, color: "var(--color-text-bright)" }}>
+                  Nueva versión disponible
+                </div>
+                <div style={{ ...mono, fontSize: 11, color: "var(--color-cyan)" }}>
+                  NumLab {updateInfo.latestVersion} (actual: v{APP_VERSION})
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={() => setUpdateToastDismissed(true)}
+              style={{ background: "transparent", border: "none", color: "var(--color-text-muted)", cursor: "pointer", fontSize: 14, padding: "0 2px" }}
+              title="Cerrar aviso"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, marginTop: 2 }}>
+            {updateInfo.downloadUrl && (
+              <a
+                href={updateInfo.downloadUrl}
+                target="_blank"
+                rel="noreferrer"
+                style={{
+                  flex: 1,
+                  textAlign: "center",
+                  background: "linear-gradient(135deg, #00d4ff 0%, #0099ff 100%)",
+                  color: "#050914",
+                  fontWeight: 700,
+                  ...ui,
+                  fontSize: 11,
+                  padding: "6px 12px",
+                  borderRadius: 5,
+                  textDecoration: "none",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 5,
+                }}
+              >
+                <span>📥</span> Descargar {updateInfo.fileName?.endsWith(".dmg") ? ".dmg (Mac)" : updateInfo.fileName?.endsWith(".exe") ? ".exe (Windows)" : "actualización"}
+              </a>
+            )}
+            <button
+              onClick={() => setShowReleaseModal(true)}
+              style={{
+                background: "#162035",
+                border: "1px solid var(--color-border)",
+                color: "var(--color-text-bright)",
+                ...ui,
+                fontSize: 11,
+                padding: "6px 12px",
+                borderRadius: 5,
+                cursor: "pointer",
+              }}
+            >
+              Notas
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Release notes modal */}
+      {showReleaseModal && updateInfo && (
+        <ReleaseNotesModal
+          info={updateInfo}
+          onClose={() => setShowReleaseModal(false)}
+        />
+      )}
     </div>
   );
 }

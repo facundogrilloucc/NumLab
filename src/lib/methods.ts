@@ -467,6 +467,8 @@ export function luDecomposition(A: number[][], b: number[]): MethodResult {
   const subs = ["₁", "₂", "₃", "₄", "₅", "₆"];
 
   const permutation = Array.from({ length: n }, (_, i) => i);
+  const pivotingSteps: string[] = [];
+
   for (let k = 0; k < n; k++) {
     let maxRow = k;
     for (let i = k + 1; i < n; i++) {
@@ -479,14 +481,18 @@ export function luDecomposition(A: number[][], b: number[]): MethodResult {
       [U[k], U[maxRow]] = [U[maxRow], U[k]];
       [permutation[k], permutation[maxRow]] = [permutation[maxRow], permutation[k]];
       for (let j = 0; j < k; j++) [L[k][j], L[maxRow][j]] = [L[maxRow][j], L[k][j]];
+      pivotingSteps.push(`F${subs[k] ?? k + 1} ↔ F${subs[maxRow] ?? maxRow + 1}`);
     }
     for (let i = k + 1; i < n; i++) {
       L[i][k] = U[i][k] / U[k][k];
       for (let j = k; j < n; j++) U[i][j] -= L[i][k] * U[k][j];
+      U[i][k] = 0; // Cero estricto para eliminar residuo de punto flotante
     }
   }
 
+  const hadPivoting = pivotingSteps.length > 0;
   const permutedB = permutation.map(i => b[i]);
+
   // Forward substitution Ly = Pb
   const y = new Array(n).fill(0);
   const forwardSteps: { variable: string; formula: string; value: number }[] = [];
@@ -517,6 +523,17 @@ export function luDecomposition(A: number[][], b: number[]): MethodResult {
     backSteps.push({ variable: `x${subs[i] ?? i+1}`, formula, value: +x[i].toFixed(8) });
   }
 
+  // Verificar producto L * U vs P * A
+  let isVerified = true;
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      let prod = 0;
+      for (let k = 0; k < n; k++) prod += L[i][k] * U[k][j];
+      const target = A[permutation[i]][j];
+      if (Math.abs(prod - target) > 1e-6) isVerified = false;
+    }
+  }
+
   const iters: Iteration[] = L.map((row, i) => {
     const r: Iteration = { n: i + 1 };
     row.forEach((v, j) => { r[`L${i+1}${j+1}`] = +v.toFixed(6); });
@@ -526,7 +543,24 @@ export function luDecomposition(A: number[][], b: number[]): MethodResult {
     return r;
   });
 
-  return { solution: x, converged: true, iterations: iters, extra: { L, U, permutation, forwardSteps, backSteps, initialA: A, initialB: b } };
+  return {
+    solution: x,
+    converged: true,
+    iterations: iters,
+    extra: {
+      L,
+      U,
+      permutation,
+      hadPivoting,
+      pivotingSteps,
+      permutedB,
+      forwardSteps,
+      backSteps,
+      isVerified,
+      initialA: A,
+      initialB: b,
+    }
+  };
 }
 
 // ── Curve Fitting ─────────────────────────────────────────────────────────────
