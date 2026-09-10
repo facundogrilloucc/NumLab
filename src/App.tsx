@@ -5,7 +5,7 @@ import {
 } from "recharts";
 import {
   bisection, fixedPoint, newtonRaphson, secant,
-  gaussianElimination, gaussSeidel, luDecomposition,
+  gaussianElimination, gaussSeidel, luDecomposition, findDiagonallyDominantPermutation,
   linearRegression, lagrange, dividedDifferences, cubicSpline,
   threePointDiff, fivePointDiff,
   trapezoid, simpson13,
@@ -134,56 +134,127 @@ function DecimalHint() {
 
 // ── Matrix input ───────────────────────────────────────────────────────────────
 
-function MatrixInput({ p, onChange, showX0 = false }: { p: Record<string, string>; onChange: (k: string, v: string) => void; showX0?: boolean }) {
+function MatrixInput({
+  p,
+  onChange,
+  showX0 = false,
+  onReorderRows,
+}: {
+  p: Record<string, string>;
+  onChange: (k: string, v: string) => void;
+  showX0?: boolean;
+  onReorderRows?: (perm: number[]) => void;
+}) {
   const size = parseInt(p.size ?? "3");
   const sub = ["₁", "₂", "₃", "₄"];
+
+  let reorderInfo: { possible: boolean; perm?: number[]; explanation?: string; isAlreadyDominant: boolean } | null = null;
+  if (showX0) {
+    try {
+      const A = Array.from({ length: size }, (_, i) =>
+        Array.from({ length: size }, (_, j) => parseFloat(p[`A_${i}_${j}`] || "0"))
+      );
+      if (A.every(row => row.every(val => Number.isFinite(val)))) {
+        reorderInfo = findDiagonallyDominantPermutation(A);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <Label>Tamaño</Label>
         <select value={size} onChange={e => onChange("size", e.target.value)} style={{ width: 72, padding: "4px 8px", fontSize: 12 }}>
           {[2,3,4].map(n => <option key={n} value={n}>{n} × {n}</option>)}
         </select>
       </div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+
+      {showX0 && reorderInfo && reorderInfo.possible && !reorderInfo.isAlreadyDominant && onReorderRows && (
+        <div style={{ background: "#00d4ff10", border: "1px solid #00d4ff33", borderRadius: 6, padding: "7px 10px", display: "flex", flexDirection: "column", gap: 5 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ ...mono, fontSize: 10, color: "#00d4ff", fontWeight: 700 }}>
+              💡 Reordenamiento sugerido
+            </span>
+            <span style={{ ...mono, fontSize: 9, color: "var(--color-text-muted)" }}>
+              {reorderInfo.explanation}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => onReorderRows(reorderInfo!.perm!)}
+            style={{
+              background: "#00d4ff20",
+              border: "1px solid #00d4ff55",
+              color: "#00d4ff",
+              borderRadius: 4,
+              padding: "4px 8px",
+              ...mono,
+              fontSize: 10,
+              fontWeight: 700,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 4,
+              transition: "all 0.15s",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = "#00d4ff35"; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "#00d4ff20"; }}
+          >
+            🔄 Reordenar filas para dominancia
+          </button>
+        </div>
+      )}
+
+      {/* Sistema A · x = b */}
+      <div style={{ display: "flex", gap: 6, alignItems: "center", overflowX: "auto", paddingBottom: 2 }}>
         <div>
           <Label>Matriz A</Label>
-          <div style={{ display: "grid", gridTemplateColumns: `repeat(${size}, 54px)`, gap: 3 }}>
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${size}, ${size === 4 ? "44px" : "50px"})`, gap: 3 }}>
             {Array.from({length:size}, (_,i) => Array.from({length:size}, (_,j) => (
-              <NumInp key={`${i}_${j}`} w={50} value={p[`A_${i}_${j}`] ?? "0"} onChange={v => onChange(`A_${i}_${j}`, v)} />
+              <NumInp key={`${i}_${j}`} w={size === 4 ? 42 : 48} value={p[`A_${i}_${j}`] ?? "0"} onChange={v => onChange(`A_${i}_${j}`, v)} />
             )))}
           </div>
         </div>
-        <span style={{ ...mono, color: "var(--color-text-muted)", fontSize: 16, marginTop: 14 }}>·</span>
+        <span style={{ ...mono, color: "var(--color-text-muted)", fontSize: 14, marginTop: 14 }}>·</span>
         <div>
           <Label>x</Label>
           <div style={{ display: "grid", gridTemplateRows: `repeat(${size}, 26px)`, gap: 3, marginTop: 2 }}>
             {Array.from({length:size}, (_,i) => (
-              <div key={i} style={{ ...mono, fontSize: 11, color: "var(--color-cyan)", background: "#00d4ff11", border: "1px solid #00d4ff22", borderRadius: 4, width: 32, height: 26, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <div key={i} style={{ ...mono, fontSize: 11, color: "var(--color-cyan)", background: "#00d4ff11", border: "1px solid #00d4ff22", borderRadius: 4, width: 28, height: 26, display: "flex", alignItems: "center", justifyContent: "center" }}>
                 x{sub[i]}
               </div>
             ))}
           </div>
         </div>
-        <span style={{ ...mono, color: "var(--color-text-muted)", fontSize: 16, marginTop: 14 }}>=</span>
+        <span style={{ ...mono, color: "var(--color-text-muted)", fontSize: 14, marginTop: 14 }}>=</span>
         <div>
           <Label>Vector b</Label>
           <div style={{ display: "grid", gridTemplateRows: `repeat(${size}, 26px)`, gap: 3 }}>
-            {Array.from({length:size}, (_,i) => <NumInp key={i} w={58} value={p[`b_${i}`] ?? "0"} onChange={v => onChange(`b_${i}`, v)} />)}
+            {Array.from({length:size}, (_,i) => <NumInp key={i} w={size === 4 ? 46 : 52} value={p[`b_${i}`] ?? "0"} onChange={v => onChange(`b_${i}`, v)} />)}
           </div>
         </div>
-        {showX0 && (
-          <>
-            <span style={{ ...mono, color: "var(--color-text-muted)", fontSize: 11, marginTop: 14 }}>x⁰=</span>
-            <div>
-              <Label>Inicial x⁰</Label>
-              <div style={{ display: "grid", gridTemplateRows: `repeat(${size}, 26px)`, gap: 3 }}>
-                {Array.from({length:size}, (_,i) => <NumInp key={i} w={48} value={p[`x0_${i}`] ?? "0"} onChange={v => onChange(`x0_${i}`, v)} />)}
-              </div>
-            </div>
-          </>
-        )}
       </div>
+
+      {/* Vector inicial x^(0) para Gauss-Seidel */}
+      {showX0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, background: "#070b13", border: "1px solid var(--color-border)", borderRadius: 6, padding: "8px 10px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <Label>Vector inicial x⁽⁰⁾</Label>
+            <span style={{ ...mono, fontSize: 9, color: "var(--color-text-muted)" }}>Valores semilla</span>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            {Array.from({length:size}, (_,i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ ...mono, fontSize: 11, color: "var(--color-cyan)", fontWeight: 600 }}>x{sub[i]}⁽⁰⁾:</span>
+                <NumInp w={46} value={p[`x0_${i}`] ?? "0"} onChange={v => onChange(`x0_${i}`, v)} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -218,7 +289,17 @@ function RunBtn({ onClick, color }: { onClick: () => void; color: string }) {
 
 // ── Params per method ─────────────────────────────────────────────────────────
 
-function ParamsPanel({ methodId, p, onChange }: { methodId: string; p: Record<string, string>; onChange: (k: string, v: string) => void }) {
+function ParamsPanel({
+  methodId,
+  p,
+  onChange,
+  onReorderRows,
+}: {
+  methodId: string;
+  p: Record<string, string>;
+  onChange: (k: string, v: string) => void;
+  onReorderRows?: (perm: number[]) => void;
+}) {
   const r2 = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 } as React.CSSProperties;
   const r3 = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 } as React.CSSProperties;
   const numF = (key: string, label: string, hint?: string) => <Field label={label} hint={hint}><Inp value={p[key] ?? ""} onChange={v => onChange(key, v)} /></Field>;
@@ -262,7 +343,7 @@ function ParamsPanel({ methodId, p, onChange }: { methodId: string; p: Record<st
 
   if (methodId === "gauss-seidel") return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <MatrixInput p={p} onChange={onChange} showX0 />
+      <MatrixInput p={p} onChange={onChange} showX0 onReorderRows={onReorderRows} />
       <div style={r2}>{numF("tol", "Tolerancia", "Decimales con punto: 0.0001")}{numF("maxIter", "Máx. iter.")}</div>
     </div>
   );
@@ -304,6 +385,26 @@ function SummaryRow({ result, methodId, color }: { result: MethodResult; methodI
   const last = result.iterations.at(-1);
   const finalErr = typeof result.extra?.finalError === "number" ? result.extra.finalError : (last && typeof last.error === "number" ? last.error : undefined);
   const errVal = typeof finalErr === "number" && Number.isFinite(finalErr) ? finalErr.toExponential(3) : "—";
+
+  if (methodId === "gauss-seidel" && result.solution) {
+    const isDominant = result.extra?.isDiagonallyDominant as boolean | undefined;
+    const numIters = result.iterations.length > 1 ? result.iterations.length - 1 : result.iterations.length;
+    return (
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        {result.solution.map((xi, i) => (
+          <Card key={i} label={`x${["₁","₂","₃","₄"][i]}`} value={xi.toFixed(8)} color={color} />
+        ))}
+        <Card label="Iteraciones" value={String(numIters)} color="#4f6070" />
+        {errVal !== "—" && <Card label="Error final" value={errVal} color="#f43f5e" />}
+        {typeof isDominant === "boolean" && (
+          <Badge color={isDominant ? "#10b981" : "#f59e0b"}>
+            {isDominant ? "✓ Diag. dominante" : "⚠ No diag. dominante"}
+          </Badge>
+        )}
+        <Badge color={result.converged ? "#10b981" : "#f43f5e"}>{result.converged ? "✓ Convergió" : "✗ No convergió"}</Badge>
+      </div>
+    );
+  }
 
   if (result.solution) {
     return (
@@ -449,19 +550,39 @@ function IterTable({ iterations, methodName = "Metodo" }: { iterations: Iteratio
       <table style={{ width: "100%", borderCollapse: "collapse", ...mono, fontSize: 11 }}>
         <thead>
           <tr style={{ background: "#080c14", position: "sticky", top: 0, zIndex: 1 }}>
-            {cols.map(c => (
-              <th key={c} style={{ padding: "6px 12px", textAlign: "left", color: "var(--color-text-muted)", fontWeight: 600, letterSpacing: "0.05em", borderBottom: "1px solid var(--color-border)", whiteSpace: "nowrap" }}>{c}</th>
-            ))}
+            {cols.map(c => {
+              const isErr = c === "error" || (c.startsWith("e") && c !== "estado");
+              const label = c === "error" ? "error max" : c;
+              return (
+                <th key={c} style={{
+                  padding: "6px 12px", textAlign: "left",
+                  color: isErr ? "#f43f5e" : "var(--color-text-muted)",
+                  fontWeight: 600, letterSpacing: "0.05em",
+                  borderBottom: "1px solid var(--color-border)",
+                  whiteSpace: "nowrap"
+                }}>
+                  {label}
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
           {iterations.map((row, i) => (
             <tr key={i} style={{ background: i % 2 === 0 ? "transparent" : "#0a0f1a" }}>
-              {cols.map(c => (
-                <td key={c} style={{ padding: "5px 12px", color: c === "error" ? "#f43f5e" : c === "n" ? "var(--color-text-muted)" : "var(--color-text-bright)", borderBottom: "1px solid var(--color-border-subtle)", whiteSpace: "nowrap" }}>
-                  {row[c] === undefined ? "—" : String(row[c])}
-                </td>
-              ))}
+              {cols.map(c => {
+                const isErr = c === "error" || (c.startsWith("e") && c !== "estado");
+                return (
+                  <td key={c} style={{
+                    padding: "5px 12px",
+                    color: isErr ? "#f43f5e" : c === "n" ? "var(--color-text-muted)" : "var(--color-text-bright)",
+                    borderBottom: "1px solid var(--color-border-subtle)",
+                    whiteSpace: "nowrap"
+                  }}>
+                    {row[c] === undefined ? "—" : String(row[c])}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
@@ -656,6 +777,114 @@ function LUStepsView({
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function GaussSeidelView({
+  result,
+  methodName,
+  color,
+  onReorderRows,
+}: {
+  result: MethodResult;
+  methodName: string;
+  color: string;
+  onReorderRows?: (perm: number[]) => void;
+}) {
+  const eqns = result.extra?.recurrenceEquations as string[] | undefined;
+  const isDominant = result.extra?.isDiagonallyDominant as boolean | undefined;
+  const details = result.extra?.dominanceDetails as string[] | undefined;
+  const reorderPossible = result.extra?.reorderPossible as boolean | undefined;
+  const reorderPerm = result.extra?.reorderPerm as number[] | undefined;
+  const reorderExplanation = result.extra?.reorderExplanation as string | undefined;
+
+  return (
+    <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 14, paddingRight: 4 }}>
+      {/* Recurrence formulas & Convergence info */}
+      <div style={{ display: "grid", gridTemplateColumns: eqns && eqns.length > 0 ? "1fr 1fr" : "1fr", gap: 12 }}>
+        {eqns && eqns.length > 0 && (
+          <div style={{ background: "#0b101b", border: "1px solid var(--color-border)", borderRadius: 7, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+            <span style={{ ...mono, fontSize: 11, fontWeight: 700, color }}>
+              Ecuaciones de recurrencia despejadas
+            </span>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {eqns.map((eq, i) => (
+                <div key={i} style={{ ...mono, fontSize: 11, color: "var(--color-text-bright)", background: "#060911", padding: "6px 10px", borderRadius: 4, border: "1px solid #1c2638" }}>
+                  {eq}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {typeof isDominant === "boolean" && details && (
+          <div style={{ background: "#0b101b", border: "1px solid var(--color-border)", borderRadius: 7, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ ...mono, fontSize: 11, fontWeight: 700, color: isDominant ? "#10b981" : "#f59e0b" }}>
+                Condición de dominancia diagonal
+              </span>
+              <span style={{ ...mono, fontSize: 10, padding: "2px 6px", borderRadius: 3, background: isDominant ? "#10b98122" : "#f59e0b22", color: isDominant ? "#10b981" : "#f59e0b" }}>
+                {isDominant ? "Convergencia garantizada" : "Sin garantía de convergencia"}
+              </span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {details.map((d, i) => (
+                <div key={i} style={{ ...mono, fontSize: 10, color: "var(--color-text-muted)" }}>
+                  {d}
+                </div>
+              ))}
+            </div>
+
+            {!isDominant && reorderPossible && reorderPerm && (
+              <div style={{ background: "#00d4ff10", border: "1px solid #00d4ff33", borderRadius: 6, padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, ...mono, fontSize: 10, color: "#00d4ff" }}>
+                  <span>💡 Es posible lograr dominancia diagonal:</span>
+                  <span style={{ fontWeight: 600 }}>{reorderExplanation}</span>
+                </div>
+                {onReorderRows && (
+                  <button
+                    type="button"
+                    onClick={() => onReorderRows(reorderPerm)}
+                    style={{
+                      alignSelf: "flex-start",
+                      background: "#00d4ff22",
+                      border: "1px solid #00d4ff66",
+                      color: "#00d4ff",
+                      borderRadius: 4,
+                      padding: "5px 12px",
+                      ...mono,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      transition: "all 0.15s",
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "#00d4ff35"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "#00d4ff22"; }}
+                  >
+                    🔄 Reordenar filas y resolver
+                  </button>
+                )}
+              </div>
+            )}
+
+            {!isDominant && !reorderPossible && (
+              <div style={{ ...mono, fontSize: 10, color: "var(--color-text-muted)", marginTop: 4 }}>
+                ℹ Ninguna permutación de filas logra dominancia diagonal para esta matriz.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Iteration table */}
+      <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+        <SectionLabel>Tabla de iteraciones (k = 0 es el vector inicial x⁽⁰⁾)</SectionLabel>
+        <IterTable iterations={result.iterations} methodName={methodName} />
       </div>
     </div>
   );
@@ -1051,7 +1280,19 @@ function GraphsTab({ result, methodId, p, color }: { result: MethodResult; metho
 
 // ── Result panel ──────────────────────────────────────────────────────────────
 
-function ResultPanel({ result, methodId, p, color }: { result: MethodResult | null; methodId: string; p: Record<string, string>; color: string }) {
+function ResultPanel({
+  result,
+  methodId,
+  p,
+  color,
+  onReorderRows,
+}: {
+  result: MethodResult | null;
+  methodId: string;
+  p: Record<string, string>;
+  color: string;
+  onReorderRows?: (perm: number[]) => void;
+}) {
   const [tab, setTab] = useState<"table" | "graph">("table");
 
   if (!result) {
@@ -1059,22 +1300,21 @@ function ResultPanel({ result, methodId, p, color }: { result: MethodResult | nu
       <div style={{ flex: 1, background: "var(--color-panel)", border: "1px solid var(--color-border)", borderRadius: 8, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10 }}>
         <div style={{ fontSize: 40, opacity: 0.1, color }}>{getCat(methodId)?.icon}</div>
         <p style={{ ...ui, fontSize: 13, color: "var(--color-text-muted)", margin: 0 }}>Configura los parámetros y ejecuta el método</p>
-        <p style={{ ...mono, fontSize: 10, color: "var(--color-text-muted)", opacity: 0.5, margin: 0 }}>▶ Ejecutar</p>
       </div>
     );
   }
 
-  const methodName = getMethodMeta(methodId)?.name ?? "Metodo";
+  const methodName = getMethodMeta(methodId)?.name ?? methodId;
   const isLinearStepMethod = methodId === "gaussian" || methodId === "lu";
   const tableTabLabel = isLinearStepMethod ? "Pasos de resolución" : "Tabla de iteraciones";
 
   return (
-    <div style={{ flex: 1, background: "var(--color-panel)", border: "1px solid var(--color-border)", borderRadius: 8, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
-      {/* Summary strip */}
+    <div style={{ flex: 1, background: "var(--color-panel)", border: "1px solid var(--color-border)", borderRadius: 8, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0, minHeight: 0 }}>
+      {/* Top summary card */}
       <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--color-border)", flexShrink: 0 }}>
         <SummaryRow result={result} methodId={methodId} color={color} />
       </div>
-      {/* Tabs */}
+      {/* Tab bar */}
       <div style={{ display: "flex", borderBottom: "1px solid var(--color-border)", flexShrink: 0 }}>
         {(["table","graph"] as const).map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
@@ -1105,6 +1345,8 @@ function ResultPanel({ result, methodId, p, color }: { result: MethodResult | nu
               backSteps={result.extra.backSteps as { variable: string; formula: string; value: number }[]}
               color={color}
             />
+          ) : methodId === "gauss-seidel" ? (
+            <GaussSeidelView result={result} methodName={methodName} color={color} onReorderRows={onReorderRows} />
           ) : (
             <IterTable iterations={result.iterations} methodName={methodName} />
           )
@@ -1232,56 +1474,57 @@ export default function App() {
   const cat  = getCat(view);
   const color = cat?.color ?? "#00d4ff";
 
-  function run() {
+  function run(overrideP?: Record<string, string>) {
+    const currentP = overrideP ?? p;
     setRunError(null);
     setResult(null);
     try {
-      const tol = parsePositiveInput(p.tol ?? "1e-6", "La tolerancia");
-      const maxIter = parsePositiveInteger(p.maxIter ?? "50", "El máximo de iteraciones");
+      const tol = parsePositiveInput(currentP.tol ?? "1e-6", "La tolerancia");
+      const maxIter = parsePositiveInteger(currentP.maxIter ?? "50", "El máximo de iteraciones");
       let res: MethodResult;
 
       if (view === "bisection") {
-        const expr = validateExpression(p.expr);
-        res = bisection(expr, parseFiniteInput(p.a, "a"), parseFiniteInput(p.b, "b"), tol, maxIter);
+        const expr = validateExpression(currentP.expr);
+        res = bisection(expr, parseFiniteInput(currentP.a, "a"), parseFiniteInput(currentP.b, "b"), tol, maxIter);
       } else if (view === "fixed-point") {
-        res = fixedPoint(validateExpression(p.fExpr, "f(x)"), validateExpression(p.gExpr, "g(x)"), parseFiniteInput(p.x0, "x₀"), tol, maxIter);
+        res = fixedPoint(validateExpression(currentP.fExpr, "f(x)"), validateExpression(currentP.gExpr, "g(x)"), parseFiniteInput(currentP.x0, "x₀"), tol, maxIter);
       } else if (view === "newton") {
-        const dExpr = p.dExpr?.trim();
-        res = newtonRaphson(validateExpression(p.expr), parseFiniteInput(p.x0, "x₀"), tol, maxIter, dExpr && dExpr.length > 0 ? validateExpression(p.dExpr, "f'(x)") : undefined);
+        const dExpr = currentP.dExpr?.trim();
+        res = newtonRaphson(validateExpression(currentP.expr), parseFiniteInput(currentP.x0, "x₀"), tol, maxIter, dExpr && dExpr.length > 0 ? validateExpression(currentP.dExpr, "f'(x)") : undefined);
       } else if (view === "secant") {
-        res = secant(validateExpression(p.expr), parseFiniteInput(p.x0, "x₀"), parseFiniteInput(p.x1, "x₁"), tol, maxIter);
+        res = secant(validateExpression(currentP.expr), parseFiniteInput(currentP.x0, "x₀"), parseFiniteInput(currentP.x1, "x₁"), tol, maxIter);
       } else if (view === "gaussian" || view === "lu" || view === "gauss-seidel") {
-        const size = parsePositiveInteger(p.size ?? "3", "El tamaño de la matriz");
-        const A = Array.from({length:size}, (_,i) => Array.from({length:size}, (_,j) => parseFiniteInput(p[`A_${i}_${j}`], `A${i + 1},${j + 1}`)));
-        const b = Array.from({length:size}, (_,i) => parseFiniteInput(p[`b_${i}`], `b${i + 1}`));
+        const size = parsePositiveInteger(currentP.size ?? "3", "El tamaño de la matriz");
+        const A = Array.from({length:size}, (_,i) => Array.from({length:size}, (_,j) => parseFiniteInput(currentP[`A_${i}_${j}`], `A${i + 1},${j + 1}`)));
+        const b = Array.from({length:size}, (_,i) => parseFiniteInput(currentP[`b_${i}`], `b${i + 1}`));
         if (view === "gaussian") res = gaussianElimination(A, b);
         else if (view === "lu") res = luDecomposition(A, b);
-        else res = gaussSeidel(A, b, Array.from({length:size}, (_,i) => parseFiniteInput(p[`x0_${i}`], `x₀${i + 1}`)), tol, maxIter);
+        else res = gaussSeidel(A, b, Array.from({length:size}, (_,i) => parseFiniteInput(currentP[`x0_${i}`], `x₀${i + 1}`)), tol, maxIter);
       } else if (view === "linear-reg") {
-        const xs = parseListInput(p.xs, "Los puntos x");
-        const ys = parseListInput(p.ys, "Los valores y");
+        const xs = parseListInput(currentP.xs, "Los puntos x");
+        const ys = parseListInput(currentP.ys, "Los valores y");
         if (xs.length !== ys.length || xs.length < 2) throw new Error("Se necesitan al menos dos pares x,y del mismo tamaño.");
         res = linearRegression(xs, ys);
       } else if (view === "newton-interp") {
-        const xs = parseListInput(p.xs, "Los puntos x");
-        const ys = parseListInput(p.ys, "Los valores y");
+        const xs = parseListInput(currentP.xs, "Los puntos x");
+        const ys = parseListInput(currentP.ys, "Los valores y");
         if (xs.length !== ys.length || xs.length < 2) throw new Error("Se necesitan al menos dos pares x,y del mismo tamaño.");
-        res = dividedDifferences(xs, ys, parseFiniteInput(p.xq, "x de consulta"));
+        res = dividedDifferences(xs, ys, parseFiniteInput(currentP.xq, "x de consulta"));
       } else if (view === "lagrange") {
-        const xs = parseListInput(p.xs, "Los puntos x");
-        const ys = parseListInput(p.ys, "Los valores y");
+        const xs = parseListInput(currentP.xs, "Los puntos x");
+        const ys = parseListInput(currentP.ys, "Los valores y");
         if (xs.length !== ys.length || xs.length < 2) throw new Error("Se necesitan al menos dos pares x,y del mismo tamaño.");
-        res = lagrange(xs, ys, parseFiniteInput(p.xq, "x de consulta"));
+        res = lagrange(xs, ys, parseFiniteInput(currentP.xq, "x de consulta"));
       } else if (view === "spline") {
-        res = cubicSpline(parseListInput(p.xs, "Los puntos x"), parseListInput(p.ys, "Los valores y"), parseFiniteInput(p.xq, "x de consulta"));
+        res = cubicSpline(parseListInput(currentP.xs, "Los puntos x"), parseListInput(currentP.ys, "Los valores y"), parseFiniteInput(currentP.xq, "x de consulta"));
       } else if (view === "three-point") {
-        res = threePointDiff(validateExpression(p.expr), parseFiniteInput(p.x, "x₀"), parsePositiveInput(p.h, "h"));
+        res = threePointDiff(validateExpression(currentP.expr), parseFiniteInput(currentP.x, "x₀"), parsePositiveInput(currentP.h, "h"));
       } else if (view === "five-point") {
-        res = fivePointDiff(validateExpression(p.expr), parseFiniteInput(p.x, "x₀"), parsePositiveInput(p.h, "h"));
+        res = fivePointDiff(validateExpression(currentP.expr), parseFiniteInput(currentP.x, "x₀"), parsePositiveInput(currentP.h, "h"));
       } else if (view === "trapezoid") {
-        res = trapezoid(validateExpression(p.expr), parseFiniteInput(p.a, "a"), parseFiniteInput(p.b, "b"), parsePositiveInteger(p.n ?? "8", "n"));
+        res = trapezoid(validateExpression(currentP.expr), parseFiniteInput(currentP.a, "a"), parseFiniteInput(currentP.b, "b"), parsePositiveInteger(currentP.n ?? "8", "n"));
       } else if (view === "simpson") {
-        res = simpson13(validateExpression(p.expr), parseFiniteInput(p.a, "a"), parseFiniteInput(p.b, "b"), parsePositiveInteger(p.n ?? "8", "n"));
+        res = simpson13(validateExpression(currentP.expr), parseFiniteInput(currentP.a, "a"), parseFiniteInput(currentP.b, "b"), parsePositiveInteger(currentP.n ?? "8", "n"));
       } else return;
 
       if (res.error) setRunError(res.error);
@@ -1289,6 +1532,20 @@ export default function App() {
     } catch (e: unknown) {
       setRunError(e instanceof Error ? e.message : "Error desconocido.");
     }
+  }
+
+  function handleReorderRows(perm: number[]) {
+    const size = parseInt(p.size ?? "3");
+    const newP: Record<string, string> = { ...p };
+    for (let newIdx = 0; newIdx < size; newIdx++) {
+      const oldIdx = perm[newIdx];
+      for (let j = 0; j < size; j++) {
+        newP[`A_${newIdx}_${j}`] = p[`A_${oldIdx}_${j}`] ?? "0";
+      }
+      newP[`b_${newIdx}`] = p[`b_${oldIdx}`] ?? "0";
+    }
+    setParams(prev => ({ ...prev, [view]: newP }));
+    run(newP);
   }
 
   return (
@@ -1399,8 +1656,8 @@ export default function App() {
               {/* Left: params */}
               <div style={{ width: 330, minWidth: 330, maxWidth: 330, background: "var(--color-panel)", border: "1px solid var(--color-border)", borderRadius: 8, display: "flex", flexDirection: "column", gap: 12, padding: 16, overflowY: "auto", flexShrink: 0 }}>
                 <SectionLabel>Parámetros de entrada</SectionLabel>
-                <ParamsPanel methodId={view} p={p} onChange={onChange} />
-                <RunBtn onClick={run} color={color} />
+                <ParamsPanel methodId={view} p={p} onChange={onChange} onReorderRows={handleReorderRows} />
+                <RunBtn onClick={() => run()} color={color} />
                 {runError && (
                   <div style={{ background: "#f43f5e18", border: "1px solid #f43f5e44", borderRadius: 5, padding: "7px 12px", ...mono, fontSize: 11, color: "#f43f5e" }}>
                     ⚠ {runError}
@@ -1408,7 +1665,7 @@ export default function App() {
                 )}
               </div>
               {/* Right: results */}
-              <ResultPanel result={result} methodId={view} p={p} color={color} />
+              <ResultPanel result={result} methodId={view} p={p} color={color} onReorderRows={handleReorderRows} />
             </div>
           </>
         )}

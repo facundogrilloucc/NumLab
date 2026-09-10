@@ -2,7 +2,7 @@ import { evalFn, evalFnDerivative } from "./mathEval";
 
 export interface Iteration {
   n: number;
-  [key: string]: number | string;
+  [key: string]: number | string | undefined;
 }
 
 export interface MethodResult {
@@ -250,6 +250,117 @@ export function gaussianElimination(A: number[][], b: number[]): MethodResult {
   return { solution: x, converged: true, iterations: iters, extra: { matrixSteps, backSteps, initialA: A, initialB: b } };
 }
 
+export function checkDiagonalDominance(A: number[][]): { isDominant: boolean; details: string[] } {
+  const n = A.length;
+  const details: string[] = [];
+  let isDominant = true;
+  for (let i = 0; i < n; i++) {
+    const diag = Math.abs(A[i][i]);
+    let sumOther = 0;
+    for (let j = 0; j < n; j++) {
+      if (j !== i) sumOther += Math.abs(A[i][j]);
+    }
+    const ok = diag > sumOther;
+    if (!ok) isDominant = false;
+    details.push(`Fila ${i + 1}: |${A[i][i]}| = ${diag.toFixed(2)} ${ok ? ">" : "≤"} suma = ${sumOther.toFixed(2)}`);
+  }
+  return { isDominant, details };
+}
+
+export function findDiagonallyDominantPermutation(A: number[][]): {
+  possible: boolean;
+  perm?: number[];
+  explanation?: string;
+  isAlreadyDominant: boolean;
+} {
+  const n = A.length;
+  const indices = Array.from({ length: n }, (_, i) => i);
+
+  let alreadyDominant = true;
+  for (let i = 0; i < n; i++) {
+    const diag = Math.abs(A[i][i]);
+    let sumOther = 0;
+    for (let j = 0; j < n; j++) {
+      if (j !== i) sumOther += Math.abs(A[i][j]);
+    }
+    if (diag <= sumOther) {
+      alreadyDominant = false;
+      break;
+    }
+  }
+
+  if (alreadyDominant) {
+    return { possible: true, perm: indices, isAlreadyDominant: true };
+  }
+
+  function getPermutations(arr: number[]): number[][] {
+    if (arr.length <= 1) return [arr];
+    const result: number[][] = [];
+    for (let i = 0; i < arr.length; i++) {
+      const rest = [...arr.slice(0, i), ...arr.slice(i + 1)];
+      for (const p of getPermutations(rest)) {
+        result.push([arr[i], ...p]);
+      }
+    }
+    return result;
+  }
+
+  const allPerms = getPermutations(indices);
+  for (const perm of allPerms) {
+    let isDominant = true;
+    for (let i = 0; i < n; i++) {
+      const rowIdx = perm[i];
+      const diag = Math.abs(A[rowIdx][i]);
+      let sumOther = 0;
+      for (let j = 0; j < n; j++) {
+        if (j !== i) sumOther += Math.abs(A[rowIdx][j]);
+      }
+      if (diag <= sumOther) {
+        isDominant = false;
+        break;
+      }
+    }
+
+    if (isDominant) {
+      const subs = ["₁", "₂", "₃", "₄", "₅", "₆"];
+      const steps = perm.map((oldIdx, newIdx) => `F${subs[newIdx] ?? newIdx + 1} ← F${subs[oldIdx] ?? oldIdx + 1}`);
+      return {
+        possible: true,
+        perm,
+        explanation: steps.join(", "),
+        isAlreadyDominant: false,
+      };
+    }
+  }
+
+  return { possible: false, isAlreadyDominant: false };
+}
+
+export function buildRecurrenceEquations(A: number[][], b: number[]): string[] {
+  const n = A.length;
+  const subs = ["₁", "₂", "₃", "₄", "₅", "₆"];
+  const eqns: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const varName = `x${subs[i] ?? i + 1}`;
+    const termParts: string[] = [];
+    for (let j = 0; j < n; j++) {
+      if (j !== i) {
+        const coef = A[i][j];
+        const otherVar = `x${subs[j] ?? j + 1}`;
+        if (coef > 0) {
+          termParts.push(`− ${coef}·${otherVar}`);
+        } else if (coef < 0) {
+          termParts.push(`+ ${Math.abs(coef)}·${otherVar}`);
+        }
+      }
+    }
+    const bStr = `${b[i]}`;
+    const numerator = [bStr, ...termParts].join(" ");
+    eqns.push(`${varName} = (${numerator}) / ${A[i][i]}`);
+  }
+  return eqns;
+}
+
 export function gaussSeidel(
   A: number[][], b: number[], x0: number[], tol: number, maxIter: number
 ): MethodResult {
@@ -257,7 +368,25 @@ export function gaussSeidel(
   const x = [...x0];
   const iters: Iteration[] = [];
   let converged = false;
-  if (A.some((row, i) => Math.abs(row[i]) < 1e-14)) return { converged: false, iterations: [], error: "Gauss-Seidel requiere una diagonal sin ceros." };
+  let lastErr = 0;
+
+  if (A.some((row, i) => Math.abs(row[i]) < 1e-14)) {
+    return { converged: false, iterations: [], error: "Gauss-Seidel requiere que los elementos de la diagonal principal no sean cero (a_ii ≠ 0)." };
+  }
+
+  const diagCheck = checkDiagonalDominance(A);
+  const permCheck = findDiagonallyDominantPermutation(A);
+  const recurrenceEquations = buildRecurrenceEquations(A, b);
+
+  // Iteración 0: Vector inicial ingresado x^(0) (sin error previo)
+  const row0: Iteration = { n: 0 };
+  for (let i = 0; i < n; i++) {
+    row0[`x${i + 1}`] = +x0[i].toFixed(8);
+    row0[`e${i + 1}`] = undefined;
+  }
+  row0.error = undefined;
+  iters.push(row0);
+
   for (let k = 1; k <= maxIter; k++) {
     const xOld = [...x];
     for (let i = 0; i < n; i++) {
@@ -265,17 +394,70 @@ export function gaussSeidel(
       for (let j = 0; j < n; j++) if (j !== i) sum -= A[i][j] * x[j];
       x[i] = sum / A[i][i];
     }
-    const err = Math.max(...x.map((xi, i) => Math.abs(xi - xOld[i])));
-    const row: Iteration = { n: k, error: +err.toExponential(4) };
-    x.forEach((xi, i) => { row[`x${i+1}`] = +xi.toFixed(8); });
+
+    // Detección temprana de divergencia numérica
+    const hasNonFinite = x.some(val => !Number.isFinite(val) || Math.abs(val) > 1e15);
+    if (hasNonFinite) {
+      const row: Iteration = { n: k, estado: "⚠ divergencia detectada" };
+      for (let i = 0; i < n; i++) {
+        row[`x${i + 1}`] = Number.isFinite(x[i]) ? +x[i].toFixed(4) : "∞";
+        row[`e${i + 1}`] = "∞";
+      }
+      row.error = Infinity;
+      iters.push(row);
+      return {
+        solution: xOld,
+        converged: false,
+        iterations: iters,
+        error: `El método divergió en la iteración ${k}. La matriz ${diagCheck.isDominant ? "no cumple con el radio espectral de convergencia" : "no es diagonalmente dominante"}.`,
+        extra: {
+          finalError: Infinity,
+          isDiagonallyDominant: diagCheck.isDominant,
+          dominanceDetails: diagCheck.details,
+          recurrenceEquations,
+          reorderPossible: permCheck.possible && !permCheck.isAlreadyDominant,
+          reorderPerm: permCheck.perm,
+          reorderExplanation: permCheck.explanation,
+        }
+      };
+    }
+
+    const errs = x.map((xi, i) => Math.abs(xi - xOld[i]));
+    const err = Math.max(...errs);
+    lastErr = err;
+    const row: Iteration = { n: k };
+    for (let i = 0; i < n; i++) {
+      row[`x${i + 1}`] = +x[i].toFixed(8);
+      row[`e${i + 1}`] = +errs[i].toExponential(4);
+    }
+    row.error = +err.toExponential(4);
     iters.push(row);
-    if (err < tol) { converged = true; break; }
+
+    if (err < tol) {
+      converged = true;
+      break;
+    }
   }
+
   if (!converged && iters.length > 0) {
     const last = iters[iters.length - 1];
     last.estado = `⚠ no convergió en ${maxIter} iteraciones`;
   }
-  return { solution: x, converged, iterations: iters };
+
+  return {
+    solution: x,
+    converged,
+    iterations: iters,
+    extra: {
+      finalError: lastErr,
+      isDiagonallyDominant: diagCheck.isDominant,
+      dominanceDetails: diagCheck.details,
+      recurrenceEquations,
+      reorderPossible: permCheck.possible && !permCheck.isAlreadyDominant,
+      reorderPerm: permCheck.perm,
+      reorderExplanation: permCheck.explanation,
+    }
+  };
 }
 
 export function luDecomposition(A: number[][], b: number[]): MethodResult {
